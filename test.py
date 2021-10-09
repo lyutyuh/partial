@@ -22,7 +22,11 @@ v.set_sibling(adv)
 vp.set_left(v)
 vp.set_right(adv)
 
-new_root = Node(NodeType.NT, "S", None)
-transform(new_root, root)
+new_root = Node(NodeType.NT, "S", None, ref=root)
+
+print_tree(root, nameattr='label', left_child='left', right_child='right')
+
+
+transform(new_root)
 
 print_tree(new_root, nameattr='label', left_child='left', right_child='right')
