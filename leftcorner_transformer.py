@@ -52,7 +52,7 @@ def transform(node: Node) -> None:
     while len(stack) > 0:
         cur = stack.pop()
 
-        # inplace transformation
+        # in-place transformation
         if cur.type == NodeType.NT:
             original(cur)
         elif cur.type == NodeType.NT_NT and not eps(cur):
