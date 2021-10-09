@@ -1,6 +1,10 @@
 from node import Node, NodeType
 
 
+# TODO: We should have a better abstraction for this other than string processing
+# TODO: We should have a better discussion of what "ref" means. I think it's
+# a many to one relationship between nodes in the transformed tree and the original
+
 def extract_left_corner(node: Node) -> Node:
     while node.left is not None:
         node = node.left
@@ -24,7 +28,6 @@ def original(node: Node) -> None:
 
 
 def slashed(node: Node) -> None:
-    # TODO: We should have a better abstraction for this other than string processing
     first_chunk_label = node.label.split("-")[0]
     new_label = first_chunk_label + "-" + node.ref.parent.label
     new_right_node = Node(NodeType.NT_NT, new_label, node)
