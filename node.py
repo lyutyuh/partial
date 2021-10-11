@@ -8,24 +8,20 @@ class NodeType(Enum):
 
 
 class Node:
-    def __init__(self, type: NodeType, label: str, parent: 'Node', ref=None, sibling=None, left=None, right=None,
+    def __init__(self, type: NodeType, label: str, parent: 'Node', ref=None, left=None, right=None,
                  terminal=""):
         self.type = type
         self.label = label
         self.left = left
         self.right = right
         self.terminal = terminal
-
-        # these are nodes in the original tree
-        self.ref = ref
         self.parent = parent
-        self.sibling = sibling
+
+        # this node points to the original tree
+        self.ref = ref
 
     def set_left(self, left: 'Node') -> None:
         self.left = left
 
     def set_right(self, right: 'Node') -> None:
         self.right = right
-
-    def set_sibling(self, sibling: 'Node') -> None:
-        self.sibling = sibling
