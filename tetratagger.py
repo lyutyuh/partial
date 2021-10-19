@@ -93,7 +93,13 @@ class BottomUpTetratagger(object):
 				prev_node = stack[-2]
 				if prev_node.node_info.type == NodeType.NT_NT:
 					print("<==\tREDUCE[ {0} {1} --> {2} ]".format(*(prev_node.label, node.label, node.parent.label)))
-					actions.append(TetraType.L)
+					
+					if prev_node.node_info2.label == node.label:
+						actions.pop()
+						actions.append(TetraType.l)
+
+					else:
+						actions.append(TetraType.L)
 					stack.pop(); stack.pop()
 					stack.append(node.parent)
 			elif len(stack) == 1:
