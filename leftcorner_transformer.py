@@ -30,8 +30,8 @@ def expand_nt_right_corner(node: Node) -> None:
     rightcorner_node = extract_right_corner(node.node_info.ref)
     rightcorner_node_info = rightcorner_node.node_info.copy(rightcorner_node)
 
-    new_right_node = NodePair(node.node_info, rightcorner_node_info, parent=node)
-    new_left_node = Node(rightcorner_node_info, node)
+    new_left_node = NodePair(node.node_info, rightcorner_node_info, parent=node)
+    new_right_node = Node(rightcorner_node_info, node)
 
     node.set_left(new_left_node)
     node.set_right(new_right_node)
@@ -39,12 +39,12 @@ def expand_nt_right_corner(node: Node) -> None:
 
 def expand_nt_nt_left_corner(node: NodePair) -> None:
     parent_node = node.node_info2.ref.parent
-    new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
+    new_left_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
 
     sibling_node = node.node_info2.ref.parent.right
     sibling_node_info = NodeInfo(sibling_node.node_info.type, sibling_node.node_info.label,
                                  ref=sibling_node)
-    new_left_node = Node(sibling_node_info, parent=node)
+    new_right_node = Node(sibling_node_info, parent=node)
 
     node.set_left(new_left_node)
     node.set_right(new_right_node)
