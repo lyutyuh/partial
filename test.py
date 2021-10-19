@@ -7,24 +7,24 @@ from leftcorner_rev_transformer import rev_transform
 root = Node(NodeInfo(NodeType.NT, "S"), None)
 np = Node(NodeInfo(NodeType.NT, "NP"), root)
 vp = Node(NodeInfo(NodeType.NT, "VP"), root)
-root.set_left(np)
-root.set_right(vp)
+root.set_left(vp)
+root.set_right(np)
 
 det = Node(NodeInfo(NodeType.PT, "Det(the)"), np)
 n = Node(NodeInfo(NodeType.PT, "N(dog)"), np)
-np.set_left(det)
-np.set_right(n)
+np.set_left(n)
+np.set_right(det)
 
 v = Node(NodeInfo(NodeType.PT, "V(ran)"), vp)
 adv = Node(NodeInfo(NodeType.PT, "Adv(fast)"), vp)
-vp.set_left(v)
-vp.set_right(adv)
+vp.set_left(adv)
+vp.set_right(v)
 
 new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
 
 print_tree(root, nameattr='label', left_child='left', right_child='right')
 
-right_corner_transform(new_root)
+left_corner_transform(new_root)
 
 print_tree(new_root, nameattr='label', left_child='left', right_child='right')
 
