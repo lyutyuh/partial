@@ -50,7 +50,6 @@ def expand_nt_nt_left_corner(node: NodePair) -> None:
     node.set_right(new_right_node)
 
 
-
 def expand_nt_nt_right_corner(node: NodePair) -> None:
     parent_node = node.node_info2.ref.parent
     new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
