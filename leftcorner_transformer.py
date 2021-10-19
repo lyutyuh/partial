@@ -9,6 +9,16 @@ def extract_left_corner(node: Node) -> Node:
     return node
 
 
+def extract_left_corner_no_eps(node: Node) -> Node:
+    while node.left is not None:
+        if not eps(node.left):
+            node = node.left
+        else:
+            node = node.right
+    return node
+
+
+
 def extract_right_corner(node: Node) -> Node:
     while node.right is not None:
         node = node.right
