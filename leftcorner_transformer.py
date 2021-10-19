@@ -33,7 +33,7 @@ def expand_nt_left_corner(node: Node) -> None:
     node.set_left(new_left_node)
     node.set_right(new_right_node)
 
-def expand_nt_nt(node: NodePair) -> None:
+def expand_nt_nt_left_corner(node: NodePair) -> None:
     parent_node = node.node_info2.ref.parent
     new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
 
@@ -59,7 +59,7 @@ def left_corner_transform(cur: Node) -> None:
     elif cur.node_info.type == NodeType.NT_NT:
         assert isinstance(cur, NodePair)
         if not eps(cur):
-            expand_nt_nt(cur)
+            expand_nt_nt_left_corner(cur)
     else:
         return
     left_corner_transform(cur.left)
