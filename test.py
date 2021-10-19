@@ -44,10 +44,14 @@ while rev_new_root.parent is not None:
 # TODO: unify the left- and right-corner transform code
 
 
-#print();print()
-#tdtt = TopDownTetratagger()
-#tdtt.convert(new_root)
+print();print()
+tdtt = TopDownTetratagger()
+actions = tdtt.convert(new_root)
 
+for a in tetra_visualize(actions):
+    print(a)
+
+exit(0)
 
 butt = BottomUpTetratagger()
 actions = butt.convert(rc_root)

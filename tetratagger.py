@@ -29,34 +29,44 @@ class TopDownTetratagger(object):
 
 	def convert(self, root):
 		""" convert left-corner transformed tree to shifts and reduces """
+		actions = []
 		print_tree(root, nameattr='label', left_child='left', right_child='right')
 		stack = [root]
 		while len(stack) > 0:
-			print(stack)
-			node = stack.pop()
+			node = stack[-1]
 
-			if node.node_info.type == NodeType.NT or node.node_info.type == NodeType.NT_NT:				
+			if node.node_info.type == NodeType.NT:
+				stack.pop()
+				print("==>\tREDUCE[ {0} --> {1} {2}]".format(*(node.label, node.left.label, node.right.label)))
+				actions.append(TetraType.R)
+				
+
 				if not eps(node.right):
 					stack.append(node.right)
 				if not eps(node.left):
 					stack.append(node.left)
 
-				print("<==\tREDUCE[ {0} --> {1} {2}]".format(*(node.label, node.left.label, node.right.label)))
-
-
-				print(stack); print()
 			elif node.node_info.type == NodeType.PT:
-				print("<--\tSHIFT[ {0} ]".format(node.label))
-				print(stack); print()
+				actions.append(TetraType.r)
+				print("-->\tSHIFT[ {0} ]".format(node.label))
+				stack.pop()
+			elif node.node_info.type == NodeType.NT_NT:
+				stack.pop()
+				print("<==\tREDUCE[ {0} --> {1} {2}]".format(*(node.label, node.left.label, node.right.label)))
+				
+				# did I build a complete constituent?
+				if node.left.node_info.type == NodeType.NT:
+					actions.pop()
+					actions.append(TetraType.l)
+				else:
+					actions.append(TetraType.L)
+				if not eps(node.right):
+					stack.append(node.right)
+				if not eps(node.left):
+					stack.append(node.left)
 
-			#print(node.label)
-			#if node.left is not None and node.left.node_info.type == NodeType.PT:
-			#		print("SHIFT[ {0} ]".format(node.left.label))
-			
-			#if node.right is not None:
-		    #		stack.append(node.right)
-
-
+		print()
+		return actions
 
 class BottomUpTetratagger(object):
 	""" Kitaev and Klein (2020)"""
