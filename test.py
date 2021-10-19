@@ -4,7 +4,9 @@ from node import Node, NodeType, NodeInfo
 from leftcorner_transformer import left_corner_transform, right_corner_transform
 from leftcorner_rev_transformer import rev_transform
 
-from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize
+from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
+
+from tree import random_tree
 
 root = Node(NodeInfo(NodeType.NT, "S"), None)
 np = Node(NodeInfo(NodeType.NT, "NP"), root)
@@ -44,6 +46,10 @@ while rev_new_root.parent is not None:
 # TODO: unify the left- and right-corner transform code
 
 
+random_tree(root, "S")
+new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+left_corner_transform(new_root)
+
 print();print()
 tdtt = TopDownTetratagger()
 actions = tdtt.convert(new_root)
@@ -57,6 +63,7 @@ butt = BottomUpTetratagger()
 actions = butt.convert(rc_root)
 for a in tetra_visualize(actions):
     print(a)
+tetra_alternate(actions)
 exit(0)
 
 

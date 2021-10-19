@@ -21,6 +21,15 @@ def tetra_visualize(actions):
 		if a == TetraType.L:
  			yield "<=="
 
+def tetra_alternate(actions):
+	last = actions[0]
+	for a in actions[1:]:
+		if last == TetraType.r or last == TetraType.l:
+			assert a == TetraType.R or a == TetraType.L
+		else:
+			assert a == TetraType.r or a == TetraType.l
+		last = a
+
 
 class TopDownTetratagger(object):
 
@@ -50,7 +59,7 @@ class TopDownTetratagger(object):
 				actions.append(TetraType.r)
 				print("-->\tSHIFT[ {0} ]".format(node.label))
 				stack.pop()
-				
+
 			elif node.node_info.type == NodeType.NT_NT:
 				stack.pop()
 				print("<==\tREDUCE[ {0} --> {1} {2}]".format(*(node.label, node.left.label, node.right.label)))
