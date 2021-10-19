@@ -1,7 +1,7 @@
 from ppbtree import print_tree
 
 from node import Node, NodeType, NodeInfo
-from leftcorner_transformer import transform
+from leftcorner_transformer import left_corner_transform
 from leftcorner_rev_transformer import rev_transform
 
 root = Node(NodeInfo(NodeType.NT, "S"), None)
@@ -24,7 +24,7 @@ new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
 
 print_tree(root, nameattr='label', left_child='left', right_child='right')
 
-transform(new_root)
+left_corner_transform(new_root)
 
 print_tree(new_root, nameattr='label', left_child='left', right_child='right')
 
