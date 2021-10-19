@@ -8,10 +8,12 @@ def extract_left_corner(node: Node) -> Node:
         node = node.left
     return node
 
+
 def extract_right_corner(node: Node) -> Node:
     while node.right is not None:
         node = node.right
     return node
+
 
 def expand_nt_left_corner(node: Node) -> None:
     leftcorner_node = extract_left_corner(node.node_info.ref)
@@ -23,7 +25,8 @@ def expand_nt_left_corner(node: Node) -> None:
     node.set_left(new_left_node)
     node.set_right(new_right_node)
 
-def expand_nt_left_corner(node: Node) -> None:
+
+def expand_nt_right_corner(node: Node) -> None:
     rightcorner_node = extract_right_corner(node.node_info.ref)
     rightcorner_node_info = rightcorner_node.node_info.copy(rightcorner_node)
 
@@ -33,7 +36,22 @@ def expand_nt_left_corner(node: Node) -> None:
     node.set_left(new_left_node)
     node.set_right(new_right_node)
 
+
 def expand_nt_nt_left_corner(node: NodePair) -> None:
+    parent_node = node.node_info2.ref.parent
+    new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
+
+    sibling_node = node.node_info2.ref.parent.right
+    sibling_node_info = NodeInfo(sibling_node.node_info.type, sibling_node.node_info.label,
+                                 ref=sibling_node)
+    new_left_node = Node(sibling_node_info, parent=node)
+
+    node.set_left(new_left_node)
+    node.set_right(new_right_node)
+
+
+
+def expand_nt_nt_right_corner(node: NodePair) -> None:
     parent_node = node.node_info2.ref.parent
     new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node), parent=node)
 
@@ -64,3 +82,19 @@ def left_corner_transform(cur: Node) -> None:
         return
     left_corner_transform(cur.left)
     left_corner_transform(cur.right)
+
+
+def right_corner_transform(cur: Node) -> None:
+    if cur is None:
+        return
+    if cur.node_info.type == NodeType.NT:
+        expand_nt_right_corner(cur)
+    elif cur.node_info.type == NodeType.NT_NT:
+        assert isinstance(cur, NodePair)
+        if not eps(cur):
+            expand_nt_nt_right_corner(cur)
+    else:
+        return
+    right_corner_transform(cur.left)
+    right_corner_transform(cur.right)
+
