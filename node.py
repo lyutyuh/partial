@@ -54,6 +54,12 @@ class Node:
     def get_label(self) -> str:
         return self.node_info.label
 
+    def __str__(self) -> str:
+        return self.label
+
+    def __repr__(self) -> str:
+        return self.label
+
 
 class NodePair(Node):
     def __init__(self, node_info1: NodeInfo, node_info2: NodeInfo, parent=None, left=None,

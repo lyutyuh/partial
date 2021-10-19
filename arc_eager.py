@@ -31,20 +31,20 @@ X_b = Node(NodeInfo(NodeType.PT, "X_b"), Y_b)
 Y_b.set_left(X_b)
 Y_b.set_right(X_a)
 
-a = Node(NodeInfo(NodeType.PT, "a"), X_a)
-X_a.set_right(a)
-b = Node(NodeInfo(NodeType.PT, "b"), X_b)
-X_b.set_right(b)
+#a = Node(NodeInfo(NodeType.PT, "a"), X_a)
+#X_a.set_right(a)
+#b = Node(NodeInfo(NodeType.PT, "b"), X_b)
+#X_b.set_right(b)
 
 X_c = Node(NodeInfo(NodeType.PT, "X_c"), Y_c)
 X_d = Node(NodeInfo(NodeType.PT, "X_d"), Y_c)
 Y_c.set_left(X_d)
 Y_c.set_right(X_c)
 
-c = Node(NodeInfo(NodeType.PT, "c"), X_c)
-X_c.set_right(c)
-d = Node(NodeInfo(NodeType.PT, "d"), X_d)
-X_d.set_right(d)
+#c = Node(NodeInfo(NodeType.PT, "c"), X_c)
+#X_c.set_right(c)
+#d = Node(NodeInfo(NodeType.PT, "d"), X_d)
+#X_d.set_right(d)
 
 print_tree(root, nameattr='label', left_child='left', right_child='right')
 

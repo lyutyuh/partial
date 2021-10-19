@@ -4,6 +4,8 @@ from node import Node, NodeType, NodeInfo
 from leftcorner_transformer import left_corner_transform, right_corner_transform
 from leftcorner_rev_transformer import rev_transform
 
+from tetratagger import TopDownTetratagger
+
 root = Node(NodeInfo(NodeType.NT, "S"), None)
 np = Node(NodeInfo(NodeType.NT, "NP"), root)
 vp = Node(NodeInfo(NodeType.NT, "VP"), root)
@@ -22,14 +24,24 @@ vp.set_right(adv)
 
 new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
 
-print_tree(root, nameattr='label', left_child='left', right_child='right')
+#print_tree(root, nameattr='label', left_child='left', right_child='right')
 
 left_corner_transform(new_root)
 
-print_tree(new_root, nameattr='label', left_child='left', right_child='right')
+#print_tree(new_root, nameattr='label', left_child='left', right_child='right')
 
 rev_new_root = rev_transform(new_root)
 while rev_new_root.parent is not None:
     rev_new_root = rev_new_root.parent
 
-print_tree(rev_new_root, nameattr='label', left_child='left', right_child='right')
+#print_tree(rev_new_root, nameattr='label', left_child='left', right_child='right')
+
+# TODO: add a pruning method for nodes of the form X-X and its inverse, which I think is possible. Also remove unnecessary unaries
+# TODO: fix tree visualization
+# TODO: make sure that the leaf nodes stay after the transform
+# TODO: unify the left- and right-corner transform code
+
+
+print();print()
+tdtt = TopDownTetratagger()
+tdtt.convert(new_root)

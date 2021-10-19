@@ -63,8 +63,10 @@ def expand_nt_nt_right_corner(node: NodePair) -> None:
     node.set_right(new_right_node)
 
 
-def eps(node: NodePair) -> bool:
+def eps(node: Node) -> bool:
     """ Predicate that returns true for nodes of the type X-X """
+    if node.node_info.type != NodeType.NT_NT:
+        return False
     return node.node_info1.ref == node.node_info2.ref
 
 
