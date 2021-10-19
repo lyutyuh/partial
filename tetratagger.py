@@ -125,6 +125,7 @@ def tetra_visualize(actions):
 		if a == TetraType.L:
  			yield "<=="
 
+
 def tetra_alternate(actions):
 	last = actions[0]
 	for a in actions[1:]:
