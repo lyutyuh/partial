@@ -79,11 +79,31 @@ class BottomUpTetratagger(object):
 		print()
 
 
-		while len(stack) > 0:
+		while len(stack) != 1 or stack[0].label != "S":
 
 			print(stack)
-			node = stack.pop()
-			
+			node = stack[-1]
+					
+			if node != node.parent.right and node.parent.right is not None:
+				if node.parent.right.node_info.type == NodeType.PT:
+					print("-->\tSHIFT[ {0} ]".format(node.parent.right.label))
+					actions.append(TetraType.r)
+					stack.append(node.parent.right)
+			elif len(stack) >= 2:
+				prev_node = stack[-2]
+				if prev_node.node_info.type == NodeType.NT_NT:
+					print("<==\tREDUCE[ {0} {1} --> {2} ]".format(*(prev_node.label, node.label, node.parent.label)))
+					actions.append(TetraType.L)
+					stack.pop(); stack.pop()
+					stack.append(node.parent)
+			elif len(stack) == 1:
+				if node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
+					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
+					actions.append(TetraType.R)
+					stack.pop()
+					stack.append(node.parent)
+			#input()
+			"""
 			if node.node_info.type == NodeType.PT:	
 				if node.parent.node_info.type == NodeType.NT and node.node_info.type == NodeType.PT:
 					print("-->\tSHIFT[ {0} ]".format(node.label))
@@ -91,12 +111,14 @@ class BottomUpTetratagger(object):
 				elif node.parent.node_info.type == NodeType.NT_NT:# and eps(node.parent.left):
 					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
 					actions.append(TetraType.R)
-
-
+					stack.pop()
+					stack.append(node.parent)
+					input()
 			elif node.node_info.type == NodeType.NT_NT:
 				if node.parent.left == node and node.parent.node_info.type == NodeType.NT_NT:
 					print("-->\tSHIFT[ {0} ]".format(node.parent.right))
 					actions.append(TetraType.r)
+					stack.append(node.parent.right)
 				elif node.parent.left == node and node.parent.node_info.type == NodeType.NT:
 					print("<--\tSHIFT[ {0} ]".format(node.parent.right))
 					actions.append(TetraType.r)
@@ -108,14 +130,7 @@ class BottomUpTetratagger(object):
 				if node.parent is not None:
 					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
 					actions.append(TetraType.R)
-
-			if node.parent is not None:
-				# If I am a left child, I push my right sibling 
-				if node.parent.right == node:
-					stack.append(node.parent)
-				# If I am a right child I push my parent
-				elif node.parent.left == node:
-					stack.append(node.parent.right)
+			"""
 			print(stack);print()
 
 		return actions
