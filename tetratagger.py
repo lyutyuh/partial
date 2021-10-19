@@ -10,27 +10,6 @@ class TetraType(Enum):
     R = 2
     L = 3
 
-def tetra_visualize(actions):
-	for a in actions:
-		if a == TetraType.r:
-			yield "-->"
-		if a == TetraType.l:
- 			yield "<--"
-		if a == TetraType.R:
- 			yield "==>"
-		if a == TetraType.L:
- 			yield "<=="
-
-def tetra_alternate(actions):
-	last = actions[0]
-	for a in actions[1:]:
-		if last == TetraType.r or last == TetraType.l:
-			assert a == TetraType.R or a == TetraType.L
-		else:
-			assert a == TetraType.r or a == TetraType.l
-		last = a
-
-
 class TopDownTetratagger(object):
 
 	def __init__(self):
@@ -133,3 +112,25 @@ class BottomUpTetratagger(object):
 			print(stack);print()
 
 		return actions
+
+
+def tetra_visualize(actions):
+	for a in actions:
+		if a == TetraType.r:
+			yield "-->"
+		if a == TetraType.l:
+ 			yield "<--"
+		if a == TetraType.R:
+ 			yield "==>"
+		if a == TetraType.L:
+ 			yield "<=="
+
+def tetra_alternate(actions):
+	last = actions[0]
+	for a in actions[1:]:
+		if last == TetraType.r or last == TetraType.l:
+			assert a == TetraType.R or a == TetraType.L
+		else:
+			assert a == TetraType.r or a == TetraType.l
+		last = a
+
