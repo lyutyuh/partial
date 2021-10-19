@@ -8,6 +8,10 @@ def extract_left_corner(node: Node) -> Node:
         node = node.left
     return node
 
+def extract_right_corner(node: Node) -> Node:
+    while node.right is not None:
+        node = node.right
+    return node
 
 def expand_nt(node: Node) -> None:
     leftcorner_node = extract_left_corner(node.node_info.ref)
