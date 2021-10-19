@@ -50,6 +50,7 @@ class TopDownTetratagger(object):
 				actions.append(TetraType.r)
 				print("-->\tSHIFT[ {0} ]".format(node.label))
 				stack.pop()
+				
 			elif node.node_info.type == NodeType.NT_NT:
 				stack.pop()
 				print("<==\tREDUCE[ {0} --> {1} {2}]".format(*(node.label, node.left.label, node.right.label)))
@@ -99,6 +100,7 @@ class BottomUpTetratagger(object):
 					print("-->\tSHIFT[ {0} ]".format(node.parent.right.label))
 					actions.append(TetraType.r)
 					stack.append(node.parent.right)
+
 			elif len(stack) >= 2:
 				prev_node = stack[-2]
 				if prev_node.node_info.type == NodeType.NT_NT:
@@ -107,11 +109,11 @@ class BottomUpTetratagger(object):
 					if prev_node.node_info2.label == node.label:
 						actions.pop()
 						actions.append(TetraType.l)
-
 					else:
 						actions.append(TetraType.L)
 					stack.pop(); stack.pop()
 					stack.append(node.parent)
+
 			elif len(stack) == 1:
 				if node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
 					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
