@@ -49,6 +49,11 @@ while rev_new_root.parent is not None:
 #tdtt.convert(new_root)
 
 
+butt = BottomUpTetratagger()
+actions = butt.convert(rc_root)
+for a in tetra_visualize(actions):
+    print(a)
+exit(0)
 
 
 root = Node(NodeInfo(NodeType.NT, "4"), None)
