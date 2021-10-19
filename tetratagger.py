@@ -17,9 +17,9 @@ def tetra_visualize(actions):
 		if a == TetraType.l:
  			yield "<--"
 		if a == TetraType.R:
- 			yield "<=="
-		if a == TetraType.L:
  			yield "==>"
+		if a == TetraType.L:
+ 			yield "<=="
 
 
 class TopDownTetratagger(object):
@@ -72,7 +72,8 @@ class BottomUpTetratagger(object):
 		lc = extract_left_corner_no_eps(tree)
 
 		print()
-		print("<--\tSHIFT[ {0} ]".format(lc.label))
+		print("-->\tSHIFT[ {0} ]".format(lc.label))
+		actions.append(TetraType.r)
 		stack = [lc]
 		print(stack)
 		print()
@@ -85,8 +86,8 @@ class BottomUpTetratagger(object):
 			
 			if node.node_info.type == NodeType.PT:	
 				if node.parent.node_info.type == NodeType.NT and node.node_info.type == NodeType.PT:
-					print("<--\tSHIFT[ {0} ]".format(node.label))
-					actions.append(TetraType.l)
+					print("-->\tSHIFT[ {0} ]".format(node.label))
+					actions.append(TetraType.r)
 				elif node.parent.node_info.type == NodeType.NT_NT:# and eps(node.parent.left):
 					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
 					actions.append(TetraType.R)
@@ -95,6 +96,9 @@ class BottomUpTetratagger(object):
 			elif node.node_info.type == NodeType.NT_NT:
 				if node.parent.left == node and node.parent.node_info.type == NodeType.NT_NT:
 					print("-->\tSHIFT[ {0} ]".format(node.parent.right))
+					actions.append(TetraType.r)
+				elif node.parent.left == node and node.parent.node_info.type == NodeType.NT:
+					print("<--\tSHIFT[ {0} ]".format(node.parent.right))
 					actions.append(TetraType.r)
 				elif node.parent.right == node:
 					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.right.label, node.label)))

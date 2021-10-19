@@ -49,6 +49,33 @@ while rev_new_root.parent is not None:
 #tdtt.convert(new_root)
 
 
+
+
+root = Node(NodeInfo(NodeType.NT, "4"), None)
+one = Node(NodeInfo(NodeType.NT, "1"), root)
+E = Node(NodeInfo(NodeType.PT, "E"), root)
+root.set_left(one)
+root.set_right(E)
+
+A = Node(NodeInfo(NodeType.PT, "A"), one)
+two = Node(NodeInfo(NodeType.NT, "2"), one)
+one.set_left(A)
+one.set_right(two)
+
+B = Node(NodeInfo(NodeType.PT, "B"), two)
+three = Node(NodeInfo(NodeType.NT, "3"), two)
+two.set_left(B)
+two.set_right(three)
+
+C = Node(NodeInfo(NodeType.PT, "C"), three)
+D = Node(NodeInfo(NodeType.PT, "D"), three)
+three.set_left(C)
+three.set_right(D)
+
+rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+right_corner_transform(rc_root)
+
+
 butt = BottomUpTetratagger()
 actions = butt.convert(rc_root)
 for a in tetra_visualize(actions):
