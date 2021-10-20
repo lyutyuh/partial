@@ -1,6 +1,6 @@
 from ppbtree import print_tree
 
-from node import Node, NodeType, NodeInfo
+from node import Node, DepNode, NodeType, NodeInfo
 from transform import LeftCornerTransformer, RightCornerTransformer
 from leftcorner_rev_transformer import rev_transform
 
@@ -24,7 +24,7 @@ class ArcEager(object):
 		pass
 
 
-root = Node(NodeInfo(NodeType.NT, "A"), None)
+root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 
 random_dep_tree(root)
 print_tree(root)

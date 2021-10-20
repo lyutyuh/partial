@@ -101,3 +101,6 @@ class DepNode(Node):
         # Since it should be an attribute of the node for printing the tree
         self.label = self.get_label()
 
+    def set_dep(self, dep: 'Node') -> None:
+        self.dep = dep
+

@@ -1,6 +1,6 @@
 import numpy as np
 from ppbtree import print_tree
-from node import Node, NodeType, NodeInfo
+from node import Node, DepNode, NodeType, NodeInfo
 
 
 def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
@@ -28,30 +28,41 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: Node, depth=0, p=.75, cutoff=2, labels=["A", "B", "C", "D", "E", "F", "G"]) -> None:
+def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, labels=["A", "B", "C", "D", "E", "F", "G"]) -> None:
     """ sample a random dependency tree """
 
     left, right = None, None
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = labels[depth+1]
-        left = Node(NodeInfo(NodeType.DN, left_label), node)
+        left = DepNode(NodeInfo(NodeType.DN, left_label), node)
         node.set_left(left)
-        random_dep_tree(left, depth=depth + 1)
+        counter = random_dep_tree(left, counter=counter, depth=depth+1)
     else:
-        left = Node(NodeInfo(NodeType.PT, labels[depth+1]), node)
+        left = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+"_"+str(counter)), node)
         node.set_left(left)
+        counter += 1
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
         right_label = labels[depth+1]
-        right = Node(NodeInfo(NodeType.DN, right_label), node)
+        right = DepNode(NodeInfo(NodeType.DN, right_label), node)
         node.set_right(right)
-        random_dep_tree(right, depth=depth + 1)
+        counter = random_dep_tree(right, counter=counter, depth=depth + 1)
     else:
-        right = Node(NodeInfo(NodeType.PT, labels[depth+1]), node)
+        right = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+"_"+str(counter)), node)
         node.set_right(right)
+        counter += 1
 
+    # randomly sample dependent
+    if np.random.binomial(1, .5) == 1:
+        node.set_dep(node.right)
+        node.label = node.label + "_" + node.right.label.split("_")[1]
+    else:
+        node.set_dep(node.left)    
+        node.label = node.label + "_" + node.left.label.split("_")[1]
+
+    return counter
 
 
 def example_tree_with_labels() -> Node:
