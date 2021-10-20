@@ -4,7 +4,7 @@ import numpy as np
 #np.random.seed(150)
 #np.random.seed(4)
 # left arc example
-np.random.seed(101)
+#np.random.seed(101)
 #np.random.seed(9)
 
 from visualize import print_tree
@@ -39,7 +39,7 @@ class ArcEager(object):
 
 		while len(stack) != 1 or stack[0].label != stop:
 			#input()
-			print(stack)
+			#print(stack)
 			node = stack[-1]
 			#if node.is_eps():
 			#	print("NULL[ {0} ]".format(node))
@@ -68,7 +68,6 @@ class ArcEager(object):
 
 
 				elif prev_node.parent.node_info.type == NodeType.NT and prev_node.node_info.type == NodeType.NT_NT:
-					print(node)
 					# relevant indices
 					l1 = int(prev_node.node_info1.label.split(sep)[-1])
 					l2 = int(prev_node.node_info2.label.split(sep)[-1])
@@ -97,8 +96,8 @@ class ArcEager(object):
 
 
 			# I am a left child
-			print(stack)
-			print()
+			#print(stack)
+			#print()
 			#input()
 			continue
 			if node != node.parent.right and node.parent.right is not None and node.parent.right.node_info.type == NodeType.PT:
@@ -139,7 +138,7 @@ class ArcEager(object):
 				print("SHIFT({0})".format(lc.label.split(sep)[-1]))
 
 				stack.append(lc)
-			print(stack)
+			#print(stack)
 	
 		return arcs
 
@@ -152,7 +151,7 @@ rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 #RightCornerTransformer.transform(rc_root)
 RightCornerTransformer.partial_transform(root)
 print_tree(root)
-exit(0)
+#exit(0)
 
 
 

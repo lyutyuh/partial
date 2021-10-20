@@ -52,8 +52,6 @@ class Transformer:
             return True
         l = cls._plumb(cur.left, touched)
         r = cls._plumb(cur.right, touched)
-        print(cur)
-        print(l, r)
         # TODO: this should be transform-specific
         if cur.parent is not None:
             rc = cls.extract_left_corner(cur.parent.right)
