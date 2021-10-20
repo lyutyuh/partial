@@ -30,11 +30,10 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
                     labels=["A", "B", "C", "D", "E", "F", "G"], sep="/") -> None:
     """ sample a random dependency tree """
 
-    left, right = None, None
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = labels[depth + 1]
-        left = DepNode(NodeInfo(NodeType.DN, left_label), node)
+        left = DepNode(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
         counter = random_dep_tree(left, counter=counter, depth=depth + 1)
     else:
@@ -45,7 +44,7 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
         right_label = labels[depth + 1]
-        right = DepNode(NodeInfo(NodeType.DN, right_label), node)
+        right = DepNode(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
         counter = random_dep_tree(right, counter=counter, depth=depth + 1)
     else:
@@ -56,10 +55,12 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
     # randomly sample dependent
     if np.random.binomial(1, .5) == 1:
         node.set_dep(node.right)
-        node.label = node.label + sep + node.right.label.split(sep)[1]
+        node.node_info.label = node.node_info.label + sep + node.right.node_info.label.split(sep)[1]
+        node.update_label()
     else:
         node.set_dep(node.left)
-        node.label = node.label + sep + node.left.label.split(sep)[1]
+        node.node_info.label = node.node_info.label + sep + node.left.node_info.label.split(sep)[1]
+        node.update_label()
 
     return counter
 

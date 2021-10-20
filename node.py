@@ -53,7 +53,11 @@ class Node:
         return self.left is None or self.right is None
 
     def get_label(self) -> str:
+        #sink label in node_info and node label
         return self.node_info.label
+
+    def update_label(self) -> None:
+        self.label = self.node_info.label
 
     def is_eps(self) -> bool:
         """ Predicate that returns true for nodes of the type X-X """

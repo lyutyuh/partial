@@ -1,6 +1,6 @@
 import numpy as np
 np.random.seed(0)
-from ppbtree import print_tree
+from visualize import print_tree
 
 from node import Node, DepNode, NodeType, NodeInfo
 from transform import LeftCornerTransformer, RightCornerTransformer
