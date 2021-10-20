@@ -177,7 +177,7 @@ for _ in range(trials):
 
 	#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 	#RightCornerTransformer.transform(rc_root)
-	#RightCornerTransformer.partial_transform(root)
+	RightCornerTransformer.partial_transform(root)
 	#print_tree(root)
 	#exit(0)
 
