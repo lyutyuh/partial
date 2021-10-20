@@ -68,6 +68,7 @@ class LeftCornerTransformer(Transformer):
         node.set_left(new_left_node)
         node.set_right(new_right_node)
 
+
 class RightCornerTransformer(Transformer):
     @classmethod
     def extract_right_corner(cls, node: Node) -> Node:
