@@ -1,6 +1,7 @@
 import numpy as np
 
 # right arc example
+#np.random.seed(150)
 #np.random.seed(4)
 # left arc example
 #np.random.seed(101)
@@ -34,6 +35,7 @@ class ArcEager(object):
 		print()
 		lc = LeftCornerTransformer.extract_left_corner(tree)
 		stack = [lc]
+		delayed = -1
 
 		while len(stack) != 1 or stack[0].label != stop:
 			#input()
@@ -46,29 +48,38 @@ class ArcEager(object):
 				stack.append(node.parent.right)
 			elif len(stack) >= 2 and stack[-2].parent == node.parent:
 				prev_node = stack[-2]
+				
+
 				if prev_node.parent.node_info.type == NodeType.NT_NT:
-					print("HERE", node.parent)
+					# relevant indices
 					l1 = int(prev_node.parent.node_info1.label.split(sep)[-1])
 					l2 = int(prev_node.parent.node_info2.label.split(sep)[-1])
-								
 					r1 = int(node.label.split("-")[0].split(sep)[-1])
+				
+					sib = int(prev_node.parent.parent.right.label.split(sep)[-1])
 
-					print(l1, l2, r1)
-					if r1 <= l2:
-						arcs.add((l2, r1))
+					print(l1, l2, r1, sib)
+					if l2 == sib:
+						if r1 <= l2:
+							arcs.add((l2, r1))
+						else:
+							arcs.add((r1, l2))
 					else:
-						arcs.add((r1, l2))
-					#if l2 == r1:
-					#	print(l1, l2)
-					#	
-					#	node.parent.node_info1 = prev_node.node_info1
+						delayed = r1
 
-					#else:
-					#	#print("HERE")
-					#	node.parent.node_info1 = prev_node.left.node_info2
-				else:
-					#print("BREAK")
-					pass
+
+				elif prev_node.parent.node_info.type == NodeType.NT:
+					# relevant indices
+					l1 = int(prev_node.node_info1.label.split(sep)[-1])
+					l2 = int(prev_node.node_info2.label.split(sep)[-1])
+					r1 = int(node.label.split("-")[0].split(sep)[-1])
+					
+					if l2 == r1:
+						if delayed <= l2:
+							arcs.add((l2, delayed))
+						else:
+							arcs.add((delayed, l2))
+
 				stack.pop(); stack.pop()
 				stack.append(node.parent)
 
@@ -138,11 +149,11 @@ rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 RightCornerTransformer.transform(rc_root)
 print_tree(rc_root)
 
-#lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-#LeftCornerTransformer.transform(lc_root)
-#print_tree(lc_root)
+lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+LeftCornerTransformer.transform(lc_root)
+print_tree(lc_root)
 
-#exit(0)
+exit(0)
 arc_eager = ArcEager()
 arcs2 = arc_eager.convert(rc_root)
 print(arcs1)
