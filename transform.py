@@ -90,7 +90,6 @@ class RightCornerTransformer(Transformer):
     @classmethod
     def expand_nt_nt(cls, node: NodePair) -> None:
         parent_node = node.node_info2.ref.parent
-        print(parent_node.node_info.copy(parent_node).label)
         new_left_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node),
                                  parent=node)
 

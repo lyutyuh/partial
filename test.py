@@ -62,7 +62,7 @@ class TetrataggerTest(unittest.TestCase):
     def test_top_down(self):
         print("Please check the top down parse")
         root = Node(NodeInfo(NodeType.NT, "S"), None)
-        random_tree(root, "S", depth=3, cutoff=5)
+        random_tree(root, depth=3, cutoff=5)
         new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
         LeftCornerTransformer.transform(new_root)
         print_tree(new_root)

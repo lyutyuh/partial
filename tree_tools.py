@@ -4,7 +4,7 @@ from node import Node, DepNode, NodeType, NodeInfo
 LABELS = ["A", "B", "C", "D", "E", "F", "G"]
 
 
-def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
+def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree """
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
@@ -12,7 +12,7 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         left_label = "X/" + str(depth)
         left = Node(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
-        random_tree(left, left_label, depth=depth + 1)
+        random_tree(left, depth=depth + 1)
     else:
         left = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
         node.set_left(left)
@@ -22,7 +22,7 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         right_label = "X/" + str(depth)
         right = Node(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
-        random_tree(right, right_label, depth=depth + 1)
+        random_tree(right, depth=depth + 1)
     else:
         right = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
         node.set_right(right)
@@ -33,7 +33,7 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/")
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
-        left_label = labels[depth + 1]
+        left_label = LABELS[depth + 1]
         left = DepNode(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
         counter = random_dep_tree(left, counter=counter, depth=depth + 1)
