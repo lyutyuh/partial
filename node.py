@@ -54,6 +54,11 @@ class Node:
     def get_label(self) -> str:
         return self.node_info.label
 
+    def is_eps(self) -> bool:
+        """ Predicate that returns true for nodes of the type X-X """
+        if self.node_info.type != NodeType.NT_NT:
+            return False
+
     def __str__(self) -> str:
         return self.label
 
@@ -78,3 +83,6 @@ class NodePair(Node):
 
     def get_label(self) -> str:
         return self.node_info1.label + "-" + self.node_info2.label
+
+    def is_eps(self) -> bool:
+        return self.node_info1.ref == self.node_info2.ref

@@ -1,7 +1,7 @@
 from ppbtree import print_tree
 
 from node import Node, NodeType, NodeInfo
-from leftcorner_transformer import left_corner_transform, right_corner_transform
+from transform import left_corner_transform, right_corner_transform
 
 
 class ArcEager(object):

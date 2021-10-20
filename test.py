@@ -1,7 +1,7 @@
 from ppbtree import print_tree
 
 from node import Node, NodeType, NodeInfo
-from leftcorner_transformer import left_corner_transform, right_corner_transform
+from transform import LeftCornerTransformer, RightCornerTransformer
 from leftcorner_rev_transformer import rev_transform
 
 from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
@@ -28,10 +28,10 @@ vp.set_right(adv)
 #print_tree(root, nameattr='label', left_child='left', right_child='right')
 
 new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-left_corner_transform(new_root)
+LeftCornerTransformer.transform(new_root)
 
 rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-right_corner_transform(rc_root)
+RightCornerTransformer.transform(rc_root)
 #print_tree(rc_root, nameattr='label', left_child='left', right_child='right')
 
 rev_new_root = rev_transform(new_root)
@@ -48,7 +48,7 @@ while rev_new_root.parent is not None:
 
 random_tree(root, "S")
 new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-left_corner_transform(new_root)
+LeftCornerTransformer.transform(new_root)
 
 print();print()
 tdtt = TopDownTetratagger()
@@ -89,7 +89,7 @@ three.set_left(C)
 three.set_right(D)
 
 rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-right_corner_transform(rc_root)
+RightCornerTransformer.transform(rc_root)
 
 
 butt = BottomUpTetratagger()
