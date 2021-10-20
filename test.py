@@ -8,21 +8,7 @@ from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize
 
 from tree import random_tree
 
-root = Node(NodeInfo(NodeType.NT, "S"), None)
-np = Node(NodeInfo(NodeType.NT, "NP"), root)
-vp = Node(NodeInfo(NodeType.NT, "VP"), root)
-root.set_left(np)
-root.set_right(vp)
 
-det = Node(NodeInfo(NodeType.PT, "Det(the)"), np)
-n = Node(NodeInfo(NodeType.PT, "N(dog)"), np)
-np.set_left(det)
-np.set_right(n)
-
-v = Node(NodeInfo(NodeType.PT, "V(ran)"), vp)
-adv = Node(NodeInfo(NodeType.PT, "Adv(fast)"), vp)
-vp.set_left(v)
-vp.set_right(adv)
 
 
 #print_tree(root, nameattr='label', left_child='left', right_child='right')
