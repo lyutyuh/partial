@@ -1,5 +1,5 @@
 import numpy as np
-np.random.seed(0)
+#np.random.seed(3)
 from visualize import print_tree
 
 from node import Node, DepNode, NodeType, NodeInfo
@@ -17,7 +17,7 @@ class ArcEager(object):
 		pass
 
 
-	def convert(self, tree):
+	def convert(self, tree, sep="/"):
 		""" convert right-corner transformed tree to shifts and reduces """
 		#actions = []
 		stop = tree.label
@@ -27,47 +27,56 @@ class ArcEager(object):
 		lc = LeftCornerTransformer.extract_left_corner_no_eps(tree)
 
 		print()
-		print("-->\tSHIFT[ {0} ]".format(lc.label))
+		#print("-->\tSHIFT[ {0} ]".format(lc.label))
+		print("SHIFT({0})".format(lc.label.split(sep)[-1]))
+
 		#actions.append(TetraType.r)
 		stack = [lc]
-		print(stack)
-		print()
+		#print(stack)
+		#print()
 
 		while len(stack) != 1 or stack[0].label != stop:
-
+			#input()
 			print(stack)
 			node = stack[-1]
-			print(node, node.parent.right)
-			if node != node.parent.right and node.parent.right is not None:
-				if node.parent.right.node_info.type == NodeType.PT:
-					print("-->\tSHIFT[ {0} ]".format(node.parent.right.label))
-					#actions.append(TetraType.r)
-					stack.append(node.parent.right)
 
-			elif len(stack) >= 2:
+			if node != node.parent.right and node.parent.right is not None and node.parent.right.node_info.type == NodeType.PT:
+				print("SHIFT({0})".format(node.parent.right.label.split(sep)[-1]))
+
+				stack.append(node.parent.right)
+
+			elif len(stack) >= 2 and stack[-2].node_info.type == NodeType.NT_NT:
 				prev_node = stack[-2]
-				if prev_node.node_info.type == NodeType.NT_NT:
-					print("<==\tREDUCE[ {0} {1} --> {2} ]".format(*(prev_node.label, node.label, node.parent.label)))
+				if prev_node.label.split("-")[0] == node.parent.label:
+					print("REDUCE")
+				else:
+					two = int(node.parent.label.split("-")[0].split(sep)[-1])
+					three = int(node.parent.label.split("-")[1].split(sep)[-1])
+					print("{0} --> {1}".format(*(two, three)))
 
-					#if prev_node.node_info2.label == node.label:
-					#	actions.pop()
-					#	actions.append(TetraType.l)
-					#else:
-					#	#	actions.append(TetraType.L)
-					stack.pop()
-					stack.pop()
-					stack.append(node.parent)
+				stack.pop()
+				stack.pop()
+				stack.append(node.parent)
 
-			elif len(stack) == 1:
-				if node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
-					print("==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
-					#actions.append(TetraType.R)
-					stack.pop()
-					stack.append(node.parent)
+			elif len(stack) == 1 and (node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT):
+				one = int(node.label.split(sep)[-1])
+				two = int(node.parent.label.split("-")[0].split(sep)[-1])
+				three = int(node.parent.label.split("-")[1].split(sep)[-1])
+				#(one, two, three)
+				if one == two:
+					print("{0} --> {1}".format(*(two, three)))
+				else:
+					print("{0} <-- {1}".format(*(one, two)))
 
+				stack.pop()
+				stack.append(node.parent)
+			elif node.parent is not None and node.parent.left == node:
+				lc = LeftCornerTransformer.extract_left_corner_no_eps(node.parent.right)
+				print("SHIFT({0})".format(lc.label.split(sep)[-1]))
+
+				stack.append(lc)
 			print(stack)
-			print()
-
+	
 		#return actions
 
 root = DepNode(NodeInfo(NodeType.NT, "A"), None)
