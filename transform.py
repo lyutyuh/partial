@@ -97,11 +97,5 @@ class RightCornerTransformer(Transformer):
         sibling_node = node.node_info2.ref.parent.left
         new_right_node = Node(sibling_node.node_info.copy(sibling_node), parent=node)
 
-        # print(node.label)
-        # print(new_left_node.label)
-        # print(new_right_node.label)
-
         node.set_left(new_left_node)
         node.set_right(new_right_node)
-
-

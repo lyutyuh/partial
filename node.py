@@ -5,7 +5,6 @@ class NodeType(Enum):
     NT = 0
     NT_NT = 1
     PT = 2
-    DN = 3
 
 
 class NodeInfo:
@@ -53,7 +52,7 @@ class Node:
         return self.left is None or self.right is None
 
     def get_label(self) -> str:
-        #sink label in node_info and node label
+        # sink label in node_info and node label
         return self.node_info.label
 
     def update_label(self) -> None:
@@ -92,10 +91,10 @@ class NodePair(Node):
     def is_eps(self) -> bool:
         return self.node_info1.ref == self.node_info2.ref
 
-    def __str__(self) -> str:   
+    def __str__(self) -> str:
         return self.get_label()
 
-    def __repr__(self) -> str: 
+    def __repr__(self) -> str:
         return self.get_label()
 
 
@@ -106,4 +105,3 @@ class DepNode(Node):
 
     def set_dep(self, dep: 'Node') -> None:
         self.dep = dep
-

@@ -1,6 +1,8 @@
 import numpy as np
 from node import Node, DepNode, NodeType, NodeInfo
 
+LABELS = ["A", "B", "C", "D", "E", "F", "G"]
+
 
 def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree """
@@ -26,8 +28,7 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
-                    labels=["A", "B", "C", "D", "E", "F", "G"], sep="/") -> None:
+def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/") -> int:
     """ sample a random dependency tree """
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
@@ -37,18 +38,18 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
         node.set_left(left)
         counter = random_dep_tree(left, counter=counter, depth=depth + 1)
     else:
-        left = DepNode(NodeInfo(NodeType.PT, labels[depth + 1] + sep + str(counter)), node)
+        left = DepNode(NodeInfo(NodeType.PT, LABELS[depth + 1] + sep + str(counter)), node)
         node.set_left(left)
         counter += 1
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
-        right_label = labels[depth + 1]
+        right_label = LABELS[depth + 1]
         right = DepNode(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
         counter = random_dep_tree(right, counter=counter, depth=depth + 1)
     else:
-        right = DepNode(NodeInfo(NodeType.PT, labels[depth + 1] + sep + str(counter)), node)
+        right = DepNode(NodeInfo(NodeType.PT, LABELS[depth + 1] + sep + str(counter)), node)
         node.set_right(right)
         counter += 1
 
