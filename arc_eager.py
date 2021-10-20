@@ -2,9 +2,9 @@ import numpy as np
 
 # right arc example
 #np.random.seed(150)
-np.random.seed(4)
+#np.random.seed(4)
 # left arc example
-#np.random.seed(101)
+np.random.seed(101)
 #np.random.seed(9)
 
 from visualize import print_tree

@@ -11,6 +11,18 @@ class Transformer:
         raise NotImplementedError("expand paired non-terimnal is not implemented")
 
     @classmethod
+    def extract_right_corner(cls, node: Node) -> Node:
+        while node.right is not None:
+            node = node.right
+        return node
+
+    @classmethod
+    def extract_left_corner(cls, node: Node) -> Node:
+        while node.left is not None:
+            node = node.left
+        return node
+
+    @classmethod
     def transform(cls, cur: Node) -> None:
         if cur is None:
             return
@@ -43,9 +55,11 @@ class Transformer:
         print(cur)
         print(l, r)
         # TODO: this should be transform-specific
-        if l and r and cur.left == cur.dep:
-            touched[cur] = True
-            return True              
+        if cur.parent is not None:
+            rc = cls.extract_left_corner(cur.parent.right)
+            if l and r and cur.parent and int(rc.label.split("/")[1]) >= int(cur.parent.label.split("/")[1]):
+                touched[cur] = True
+                return True              
         touched[cur] = False      
         return False
 
@@ -69,11 +83,6 @@ class Transformer:
 
 
 class LeftCornerTransformer(Transformer):
-    @classmethod
-    def extract_left_corner(cls, node: Node) -> Node:
-        while node.left is not None:
-            node = node.left
-        return node
 
     @classmethod
     def extract_left_corner_no_eps(cls, node: Node) -> Node:
@@ -112,11 +121,6 @@ class LeftCornerTransformer(Transformer):
 
 
 class RightCornerTransformer(Transformer):
-    @classmethod
-    def extract_right_corner(cls, node: Node) -> Node:
-        while node.right is not None:
-            node = node.right
-        return node
 
     @classmethod
     def expand_nt(cls, node: Node) -> None:
