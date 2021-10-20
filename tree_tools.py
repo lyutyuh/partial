@@ -26,39 +26,40 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, labels=["A", "B", "C", "D", "E", "F", "G"], sep="/") -> None:
+def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2,
+                    labels=["A", "B", "C", "D", "E", "F", "G"], sep="/") -> None:
     """ sample a random dependency tree """
 
     left, right = None, None
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
-        left_label = labels[depth+1]
+        left_label = labels[depth + 1]
         left = DepNode(NodeInfo(NodeType.DN, left_label), node)
         node.set_left(left)
-        counter = random_dep_tree(left, counter=counter, depth=depth+1)
+        counter = random_dep_tree(left, counter=counter, depth=depth + 1)
     else:
-        left = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+sep+str(counter)), node)
+        left = DepNode(NodeInfo(NodeType.PT, labels[depth + 1] + sep + str(counter)), node)
         node.set_left(left)
         counter += 1
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
-        right_label = labels[depth+1]
+        right_label = labels[depth + 1]
         right = DepNode(NodeInfo(NodeType.DN, right_label), node)
         node.set_right(right)
         counter = random_dep_tree(right, counter=counter, depth=depth + 1)
     else:
-        right = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+sep+str(counter)), node)
+        right = DepNode(NodeInfo(NodeType.PT, labels[depth + 1] + sep + str(counter)), node)
         node.set_right(right)
         counter += 1
 
     # randomly sample dependent
     if np.random.binomial(1, .5) == 1:
         node.set_dep(node.right)
-        node.label = node.label+sep+node.right.label.split(sep)[1]
+        node.label = node.label + sep + node.right.label.split(sep)[1]
     else:
-        node.set_dep(node.left)    
-        node.label = node.label+sep+node.left.label.split(sep)[1]
+        node.set_dep(node.left)
+        node.label = node.label + sep + node.left.label.split(sep)[1]
 
     return counter
 
@@ -99,6 +100,30 @@ def example_tree_without_labels() -> Node:
     X_d = Node(NodeInfo(NodeType.PT, "X_d"), Y_c)
     Y_c.set_left(X_d)
     Y_c.set_right(X_c)
+    return root
+
+
+def tetratagger_example() -> Node:
+    root = Node(NodeInfo(NodeType.NT, "4"), None)
+    one = Node(NodeInfo(NodeType.NT, "1"), root)
+    E = Node(NodeInfo(NodeType.PT, "E"), root)
+    root.set_left(one)
+    root.set_right(E)
+
+    A = Node(NodeInfo(NodeType.PT, "A"), one)
+    two = Node(NodeInfo(NodeType.NT, "2"), one)
+    one.set_left(A)
+    one.set_right(two)
+
+    B = Node(NodeInfo(NodeType.PT, "B"), two)
+    three = Node(NodeInfo(NodeType.NT, "3"), two)
+    two.set_left(B)
+    two.set_right(three)
+
+    C = Node(NodeInfo(NodeType.PT, "C"), three)
+    D = Node(NodeInfo(NodeType.PT, "D"), three)
+    three.set_left(C)
+    three.set_right(D)
     return root
 
 
