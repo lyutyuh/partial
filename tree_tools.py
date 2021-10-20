@@ -28,7 +28,7 @@ def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: DepNode, arcs, counter=0, depth=0, p=.75, cutoff=2, sep="/") -> int:
+def random_dep_tree(node: DepNode, arcs, counter=1, depth=0, p=.75, cutoff=2, sep="/") -> int:
     """ sample a random dependency tree """
 
     left, right = None, None
@@ -61,12 +61,22 @@ def random_dep_tree(node: DepNode, arcs, counter=0, depth=0, p=.75, cutoff=2, se
         node.set_dep(node.right)
         node.node_info.label = node.node_info.label + sep + one
         node.update_label()
-        arcs.add(two + " <-- " + one)
+        #arcs.add(two + " <-- " + one)
+        one, two = int(one), int(two)
+        if one >= two:
+            arcs.add((one, two))
+        else:
+            add.arcs((two, one))
     else:
         node.set_dep(node.left)    
         node.node_info.label = node.node_info.label + sep + two
         node.update_label()
-        arcs.add(two + " --> " + one)
+        #arcs.add(two + " --> " + one)
+        one, two = int(one), int(two)
+        if one >= two:
+            arcs.add((one, two))
+        else:
+            add.arcs((two, one))
 
     return counter
 
