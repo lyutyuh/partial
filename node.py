@@ -97,15 +97,8 @@ class NodePair(Node):
 
 class DepNode(Node):
     def __init__(self, node_info: NodeInfo, parent=None, left=None, right=None, dep=None):
-        self.node_info = node_info
-
-        self.left = left
-        self.right = right
-        self.parent = parent
+        super().__init__(node_info, parent, left, right)
         self.dep = dep
-
-        # Since it should be an attribute of the node for printing the tree
-        self.label = self.get_label()
 
     def set_dep(self, dep: 'Node') -> None:
         self.dep = dep

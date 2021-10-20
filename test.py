@@ -64,16 +64,6 @@ if __name__ == '__main__':
     unittest.main()
 
 
-from node import Node, NodeType, NodeInfo
-from transform import LeftCornerTransformer, RightCornerTransformer
-
-from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
-
-from tree_tools import random_tree
-
-
-
-
 # TODO: add a pruning method for nodes of the form X-X and its inverse, which I think is possible. Also remove unnecessary unaries
 # TODO: fix tree visualization
 # TODO: make sure that the leaf nodes stay after the transform
