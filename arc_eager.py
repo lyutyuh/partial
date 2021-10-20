@@ -1,5 +1,5 @@
 import numpy as np
-#np.random.seed(3)
+np.random.seed(4)
 from visualize import print_tree
 
 from node import Node, DepNode, NodeType, NodeInfo
@@ -19,6 +19,7 @@ class ArcEager(object):
 
 	def convert(self, tree, sep="/"):
 		""" convert right-corner transformed tree to shifts and reduces """
+		arcs = set()
 		#actions = []
 		stop = tree.label
 		print_tree(tree)
@@ -53,6 +54,7 @@ class ArcEager(object):
 					two = int(node.parent.label.split("-")[0].split(sep)[-1])
 					three = int(node.parent.label.split("-")[1].split(sep)[-1])
 					print("{0} --> {1}".format(*(two, three)))
+					arcs.add("{0} --> {1}".format(*(two, three)))
 
 				stack.pop()
 				stack.pop()
@@ -65,8 +67,10 @@ class ArcEager(object):
 				#(one, two, three)
 				if one == two:
 					print("{0} --> {1}".format(*(two, three)))
+					arcs.add("{0} --> {1}".format(*(two, three)))
 				else:
 					print("{0} <-- {1}".format(*(one, two)))
+					arcs.add("{0} <-- {1}".format(*(one, two)))
 
 				stack.pop()
 				stack.append(node.parent)
@@ -77,11 +81,12 @@ class ArcEager(object):
 				stack.append(lc)
 			print(stack)
 	
-		#return actions
+		return arcs
 
 root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 
-random_dep_tree(root)
+arcs1 = set()
+random_dep_tree(root, arcs1)
 print_tree(root)
 
 print()
@@ -90,4 +95,7 @@ RightCornerTransformer.transform(rc_root)
 print_tree(rc_root)
 
 arc_eager = ArcEager()
-arc_eager.convert(rc_root)
+arcs2 = arc_eager.convert(rc_root)
+print(arcs1)
+print(arcs2)
+print(arcs1==arcs2)

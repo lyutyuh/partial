@@ -28,7 +28,7 @@ def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/") -> int:
+def random_dep_tree(node: DepNode, arcs, counter=0, depth=0, p=.75, cutoff=2, sep="/") -> int:
     """ sample a random dependency tree """
 
     left, right = None, None
@@ -38,7 +38,7 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/")
         left_label = LABELS[depth + 1]
         left = DepNode(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
-        counter = random_dep_tree(left, counter=counter, depth=depth+1)
+        counter = random_dep_tree(left, arcs, counter=counter, depth=depth+1)
     else:
         left = DepNode(NodeInfo(NodeType.PT, LABELS[depth+1]+sep+str(counter)), node)
         node.set_left(left)
@@ -49,21 +49,24 @@ def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/")
         right_label = LABELS[depth+1]
         right = DepNode(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
-        counter = random_dep_tree(right, counter=counter, depth=depth + 1)
+        counter = random_dep_tree(right, arcs, counter=counter, depth=depth + 1)
     else:
         right = DepNode(NodeInfo(NodeType.PT, LABELS[depth+1]+sep+str(counter)), node)
         node.set_right(right)
         counter += 1
 
     # randomly sample dependent
+    one, two = node.right.node_info.label.split(sep)[1], node.left.node_info.label.split(sep)[1]
     if np.random.binomial(1, .5) == 1:
         node.set_dep(node.right)
-        node.node_info.label = node.node_info.label + sep + node.right.node_info.label.split(sep)[1]
+        node.node_info.label = node.node_info.label + sep + one
         node.update_label()
+        arcs.add(two + " <-- " + one)
     else:
         node.set_dep(node.left)    
-        node.node_info.label = node.node_info.label + sep + node.left.node_info.label.split(sep)[1]
+        node.node_info.label = node.node_info.label + sep + two
         node.update_label()
+        arcs.add(two + " --> " + one)
 
     return counter
 
