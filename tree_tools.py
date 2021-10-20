@@ -1,30 +1,28 @@
 import numpy as np
-from ppbtree import print_tree
 from node import Node, DepNode, NodeType, NodeInfo
 
 
 def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree """
 
-    left, right = None, None
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
-        left_label = label + "l"
+        left_label = "X/" + str(depth)
         left = Node(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
         random_tree(left, left_label, depth=depth + 1)
     else:
-        left = Node(NodeInfo(NodeType.PT, label + "l"), node)
+        left = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
         node.set_left(left)
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
-        right_label = label + "r"
+        right_label = "X/" + str(depth)
         right = Node(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
         random_tree(right, right_label, depth=depth + 1)
     else:
-        right = Node(NodeInfo(NodeType.PT, label + "r"), node)
+        right = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
         node.set_right(right)
 
 
@@ -104,3 +102,13 @@ def example_tree_without_labels() -> Node:
     return root
 
 
+def is_equal(node1: Node, node2: Node) -> bool:
+    if node1 is None and node2 is not None:
+        return False
+    if node1 is not None and node2 is None:
+        return False
+    if node1 is None and node2 is None:
+        return True
+    if node1.label != node2.label:
+        return False
+    return is_equal(node1.left, node2.left) and is_equal(node1.right, node2.right)
