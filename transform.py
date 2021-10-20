@@ -42,6 +42,7 @@ class Transformer:
     def plumb(cls, cur:Node):
         touched = {}
         cls._plumb(cur, touched)
+        print(touched)
         for node in touched:
             if touched[node] and (node.parent not in touched or not touched[node.parent]):
                 yield node
@@ -55,7 +56,8 @@ class Transformer:
         # TODO: this should be transform-specific
         if cur.parent is not None:
             rc = cls.extract_left_corner(cur.parent.right)
-            if l and r and cur.parent and int(rc.label.split("/")[1]) >= int(cur.parent.label.split("/")[1]):
+            #print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.parent.right.label.split("/")[1]))
+            if l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
                 touched[cur] = True
                 return True              
         touched[cur] = False      
@@ -65,8 +67,9 @@ class Transformer:
     def partial_transform(cls, cur:Node) -> None:
         """ partial transform """
         rc_root = Node(NodeInfo(NodeType.NT, cur.label, ref=cur), None)
-        cls.transform(rc_root)
-        print_tree(rc_root)
+        #cls.transform(rc_root)
+        #print_tree(rc_root)
+
 
         for node in cls.plumb(cur):
             rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)

@@ -1,5 +1,9 @@
 import numpy as np
 
+seed = np.random.randint(1000)
+print(seed)
+np.random.seed(seed)
+#np.random.seed(630)
 # right arc example
 #np.random.seed(150)
 #np.random.seed(4)
@@ -58,12 +62,20 @@ class ArcEager(object):
 				
 					sib = int(prev_node.parent.parent.right.label.split(sep)[-1])
 
-					print(l1, l2, r1, sib)
-					if l2 == sib:
-						if r1 <= l2:
-							arcs.add((l2, r1))
-						else:
-							arcs.add((r1, l2))
+					#print(l1, l2, r1, sib)
+					if l1 == l2:
+						output = "{0} <-- {1}".format(*(r1, l1))
+						print(output)
+						arcs.add(output)
+					else:
+						output = "{0} --> {1}".format(*(l1, sib))
+						print(output)
+						arcs.add(output)
+					#if l2 == sib:
+					#	if r1 <= l2:
+					#		arcs.add((l2, r1))
+					#	else:
+					#		arcs.add((r1, l2))
 	
 
 
@@ -76,11 +88,21 @@ class ArcEager(object):
 				else:
 					l = int(prev_node.label.split(sep)[-1])
 					r = int(node.label.split(sep)[-1])
+					h = int(node.parent.label.split(sep)[-1])
 
-					if r <= l:
-						arcs.add((l, r))
+					if h == l:
+						output = "{0} --> {1}".format(*(l, r))
+						print(output)
+						arcs.add(output)
 					else:
-						arcs.add((r, l))
+						output = "{0} <-- {1}".format(*(l, r))
+						print(output)
+						arcs.add(output)
+
+					#if r <= l:
+					#	arcs.add((l, r))
+					#else:
+					#	arcs.add((r, l))
 
 				stack.pop(); stack.pop()
 				stack.append(node.parent)
@@ -146,11 +168,12 @@ root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 arcs1 = set()
 random_dep_tree(root, arcs1)
 print_tree(root)
+print()
 
 rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 #RightCornerTransformer.transform(rc_root)
 RightCornerTransformer.partial_transform(root)
-print_tree(root)
+#print_tree(root)
 #exit(0)
 
 
