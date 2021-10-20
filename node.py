@@ -88,6 +88,12 @@ class NodePair(Node):
     def is_eps(self) -> bool:
         return self.node_info1.ref == self.node_info2.ref
 
+    def __str__(self) -> str:   
+        return self.get_label()
+
+    def __repr__(self) -> str: 
+        return self.get_label()
+
 
 class DepNode(Node):
     def __init__(self, node_info: NodeInfo, parent=None, left=None, right=None, dep=None):

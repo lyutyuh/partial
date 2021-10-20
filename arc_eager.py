@@ -2,11 +2,11 @@ from ppbtree import print_tree
 
 from node import Node, DepNode, NodeType, NodeInfo
 from transform import LeftCornerTransformer, RightCornerTransformer
-from leftcorner_rev_transformer import rev_transform
+#from rev_transformer import rev_transform
 
 from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
 
-from tree import random_tree, random_dep_tree
+from tree_tools import random_tree, random_dep_tree
 
 class ArcEager(object):
 
