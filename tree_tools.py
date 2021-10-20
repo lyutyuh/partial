@@ -28,40 +28,40 @@ def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
-def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, sep="/") -> int:
+def random_dep_tree(node: DepNode, counter=0, depth=0, p=.75, cutoff=2, labels=["A", "B", "C", "D", "E", "F", "G"], sep="/") -> None:
     """ sample a random dependency tree """
 
+    left, right = None, None
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
+
         left_label = LABELS[depth + 1]
         left = DepNode(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
-        counter = random_dep_tree(left, counter=counter, depth=depth + 1)
+        counter = random_dep_tree(left, counter=counter, depth=depth+1)
     else:
-        left = DepNode(NodeInfo(NodeType.PT, LABELS[depth + 1] + sep + str(counter)), node)
+        left = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+sep+str(counter)), node)
         node.set_left(left)
         counter += 1
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
-        right_label = LABELS[depth + 1]
+        right_label = labels[depth+1]
         right = DepNode(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
         counter = random_dep_tree(right, counter=counter, depth=depth + 1)
     else:
-        right = DepNode(NodeInfo(NodeType.PT, LABELS[depth + 1] + sep + str(counter)), node)
+        right = DepNode(NodeInfo(NodeType.PT, labels[depth+1]+sep+str(counter)), node)
         node.set_right(right)
         counter += 1
 
     # randomly sample dependent
     if np.random.binomial(1, .5) == 1:
         node.set_dep(node.right)
-        node.node_info.label = node.node_info.label + sep + node.right.node_info.label.split(sep)[1]
-        node.update_label()
+        node.label = node.label+sep+node.right.label.split(sep)[1]
     else:
-        node.set_dep(node.left)
-        node.node_info.label = node.node_info.label + sep + node.left.node_info.label.split(sep)[1]
-        node.update_label()
+        node.set_dep(node.left)    
+        node.label = node.label+sep+node.left.label.split(sep)[1]
 
     return counter
 
