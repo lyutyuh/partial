@@ -3,6 +3,7 @@ import numpy as np
 seed = np.random.randint(1000)
 print(seed)
 np.random.seed(seed)
+np.random.seed(502)
 #np.random.seed(630)
 #np.random.seed(80)
 # right arc example
