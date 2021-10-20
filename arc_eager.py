@@ -72,13 +72,6 @@ class ArcEager(object):
 						output = "{0} --> {1}".format(*(r1, sib))
 						print(output)
 						arcs.add(output)
-					#if l2 == sib:
-					#	if r1 <= l2:
-					#		arcs.add((l2, r1))
-					#	else:
-					#		arcs.add((r1, l2))
-	
-
 
 				elif prev_node.parent.node_info.type == NodeType.NT and prev_node.node_info.type == NodeType.NT_NT:
 					# relevant indices
@@ -100,11 +93,6 @@ class ArcEager(object):
 						print(output)
 						arcs.add(output)
 
-					#if r <= l:
-					#	arcs.add((l, r))
-					#else:
-					#	arcs.add((r, l))
-
 				stack.pop(); stack.pop()
 				stack.append(node.parent)
 
@@ -116,57 +104,10 @@ class ArcEager(object):
 			else:
 				print("BREAK")
 
-
-
-			# I am a left child
-			#print(stack)
-			#print()
-			#input()
-			continue
-			if node != node.parent.right and node.parent.right is not None and node.parent.right.node_info.type == NodeType.PT:
-				print("SHIFT({0})".format(node.parent.right.label.split(sep)[-1]))
-
-				stack.append(node.parent.right)
-
-			elif len(stack) >= 2 and stack[-2].node_info.type == NodeType.NT_NT:
-				prev_node = stack[-2]
-				if prev_node.label.split("-")[0] == node.parent.label:
-					print("REDUCE")
-				else:
-					two = int(node.parent.label.split("-")[0].split(sep)[-1])
-					three = int(node.parent.label.split("-")[1].split(sep)[-1])
-					print("{0} --> {1}".format(*(two, three)))
-					arcs.add("{0} --> {1}".format(*(two, three)))
-
-				stack.pop()
-				stack.pop()
-				stack.append(node.parent)
-
-			elif len(stack) == 1 and (node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT):
-				one = int(node.label.split(sep)[-1])
-				two = int(node.parent.label.split("-")[0].split(sep)[-1])
-				three = int(node.parent.label.split("-")[1].split(sep)[-1])
-				#(one, two, three)
-				if one == two:
-					print("{0} --> {1}".format(*(two, three)))
-					arcs.add("{0} --> {1}".format(*(two, three)))
-				else:
-					print("{0} <-- {1}".format(*(one, two)))
-					arcs.add("{0} <-- {1}".format(*(one, two)))
-
-				stack.pop()
-				stack.append(node.parent)
-			elif node.parent is not None and node.parent.left == node:
-				lc = LeftCornerTransformer.extract_left_corner_no_eps(node.parent.right)
-				print("SHIFT({0})".format(lc.label.split(sep)[-1]))
-
-				stack.append(lc)
-			#print(stack)
-	
 		return arcs
 
 
-trials = 1000
+trials = 1
 for _ in range(trials):
 	root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 	arcs1 = set()
