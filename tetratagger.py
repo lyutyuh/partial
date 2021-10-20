@@ -1,7 +1,7 @@
-from ppbtree import print_tree
-from node import Node, NodeType, NodeInfo
-from transform import LeftCornerTransformer, RightCornerTransformer
 from enum import Enum
+
+from node import Node, NodeType
+from transform import LeftCornerTransformer
 
 
 class TetraType(Enum):
@@ -19,7 +19,6 @@ class TopDownTetratagger(object):
     def convert(self, root: Node):
         """ convert left-corner transformed tree to shifts and reduces """
         actions = []
-        print_tree(root, nameattr='label', left_child='left', right_child='right')
         stack: [Node] = [root]
         while len(stack) > 0:
             node = stack[-1]
