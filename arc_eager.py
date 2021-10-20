@@ -2,10 +2,10 @@ import numpy as np
 
 # right arc example
 #np.random.seed(150)
-np.random.seed(4)
+#np.random.seed(4)
 # left arc example
 #np.random.seed(101)
-np.random.seed(9)
+#np.random.seed(9)
 
 from visualize import print_tree
 
@@ -34,11 +34,10 @@ class ArcEager(object):
 		print()
 		lc = LeftCornerTransformer.extract_left_corner(tree)
 		stack = [lc]
-		delayed = -1
 
 		while len(stack) != 1 or stack[0].label != stop:
 			#input()
-			print(stack)
+			#print(stack)
 			node = stack[-1]
 			#if node.is_eps():
 			#	print("NULL[ {0} ]".format(node))
@@ -63,21 +62,26 @@ class ArcEager(object):
 							arcs.add((l2, r1))
 						else:
 							arcs.add((r1, l2))
-					else:
-						delayed = r1
+	
 
 
-				elif prev_node.parent.node_info.type == NodeType.NT:
+				elif prev_node.parent.node_info.type == NodeType.NT and prev_node.node_info.type == NodeType.NT_NT:
+					print(node)
 					# relevant indices
 					l1 = int(prev_node.node_info1.label.split(sep)[-1])
 					l2 = int(prev_node.node_info2.label.split(sep)[-1])
 					r1 = int(node.label.split("-")[0].split(sep)[-1])
 					
-					if l2 == r1:
-						if delayed <= l2:
-							arcs.add((l2, delayed))
-						else:
-							arcs.add((delayed, l2))
+				else:
+					l = int(prev_node.label.split(sep)[-1])
+					r = int(node.label.split(sep)[-1])
+
+					if r <= l:
+						arcs.add((l, r))
+					else:
+						arcs.add((r, l))
+	
+
 
 				stack.pop(); stack.pop()
 				stack.append(node.parent)
@@ -91,7 +95,7 @@ class ArcEager(object):
 
 
 			# I am a left child
-			print(stack)
+			#print(stack)
 			#print()
 			#input()
 			continue
@@ -140,7 +144,7 @@ class ArcEager(object):
 root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 arcs1 = set()
 random_dep_tree(root, arcs1)
-#print_tree(root)
+print_tree(root)
 
 rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 #RightCornerTransformer.transform(rc_root)

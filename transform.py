@@ -54,10 +54,12 @@ class Transformer:
         for node in cls.plumb(cur):
             rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)
             cls.transform(rc_node)
-            if node == node.parent.left:
+            if node.parent is not None and node == node.parent.left:
                 node.parent.left = rc_node
-            elif node == node.parent.right:
+                rc_node.parent = node.parent
+            elif node.parent is not None and node == node.parent.right:
                 node.parent.right = rc_node
+                rc_node.parent = node.parent
 
 
 
