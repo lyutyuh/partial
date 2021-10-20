@@ -34,14 +34,16 @@ class ArcEager(object):
 		print()
 		lc = LeftCornerTransformer.extract_left_corner(tree)
 		stack = [lc]
+		if lc.node_info.type == NodeType.PT:
+			print("SHIFT({0})".format(int(lc.label.split(sep)[-1])))
 
 		while len(stack) != 1 or stack[0].label != stop:
 			#input()
-			#print(stack)
+			print(stack)
 			node = stack[-1]
 			#if node.is_eps():
 			#	print("NULL[ {0} ]".format(node))
-			if node != node.parent.right and node.parent.right is not None and node.parent.right.node_info.type == NodeType.PT:
+			if node == node.parent.left and node.parent.right is not None and (node.parent.right.node_info.type == NodeType.PT):
 				print("SHIFT({0})".format(node.parent.right.label.split(sep)[-1]))
 				stack.append(node.parent.right)
 			elif len(stack) >= 2 and stack[-2].parent == node.parent:
@@ -80,8 +82,6 @@ class ArcEager(object):
 						arcs.add((l, r))
 					else:
 						arcs.add((r, l))
-	
-
 
 				stack.pop(); stack.pop()
 				stack.append(node.parent)
@@ -89,14 +89,16 @@ class ArcEager(object):
 			elif len(stack) < 2 or len(stack) >= 2 and stack[-2].parent != node.parent:
 				lc = LeftCornerTransformer.extract_left_corner(node.parent.right)
 				stack.append(lc)
+				if lc.node_info.type == NodeType.PT:
+					print("SHIFT({0})".format(int(lc.label.split(sep)[-1])))
 			else:
 				print("BREAK")
 
 
 
 			# I am a left child
-			#print(stack)
-			#print()
+			print(stack)
+			print()
 			#input()
 			continue
 			if node != node.parent.right and node.parent.right is not None and node.parent.right.node_info.type == NodeType.PT:
