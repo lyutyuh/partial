@@ -1,5 +1,5 @@
 from node import Node, NodeInfo, NodePair, NodeType
-
+from visualize import print_tree
 
 class Transformer:
     @classmethod
@@ -24,6 +24,41 @@ class Transformer:
             return
         cls.transform(cur.left)
         cls.transform(cur.right)
+
+
+    @classmethod
+    def plumb(cls, cur:Node):
+        touched = {}
+        cls._plumb(cur, touched)
+        for node in touched:
+            if touched[node] and (node.parent not in touched or not touched[node.parent]):
+                yield node
+ 
+    @classmethod
+    def _plumb(cls, cur:Node, touched):
+        if cur.node_info.type == NodeType.PT:
+            return True
+        l = cls._plumb(cur.left, touched)
+        r = cls._plumb(cur.right, touched)
+
+        # TODO: this should be transform-specific
+        if l and r and cur.left == cur.dep:
+            touched[cur] = True
+            return True              
+        touched[cur] = False      
+        return False
+
+    @classmethod
+    def partial_transform(cls, cur:Node) -> None:
+        """ partial transform """
+        for node in cls.plumb(cur):
+            rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)
+            cls.transform(rc_node)
+            if node == node.parent.left:
+                node.parent.left = rc_node
+            elif node == node.parent.right:
+                node.parent.right = rc_node
+
 
 
 class LeftCornerTransformer(Transformer):
@@ -98,3 +133,5 @@ class RightCornerTransformer(Transformer):
 
         node.set_left(new_left_node)
         node.set_right(new_right_node)
+
+

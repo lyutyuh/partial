@@ -2,11 +2,10 @@ import numpy as np
 
 # right arc example
 #np.random.seed(150)
-#np.random.seed(4)
+np.random.seed(4)
 # left arc example
 #np.random.seed(101)
-
-#np.random.seed(9)
+np.random.seed(9)
 
 from visualize import print_tree
 
@@ -30,7 +29,7 @@ class ArcEager(object):
 		arcs = set()
 		#actions = []
 		stop = tree.label
-		#print_tree(tree)
+		print_tree(tree)
 		#print()
 		print()
 		lc = LeftCornerTransformer.extract_left_corner(tree)
@@ -139,23 +138,29 @@ class ArcEager(object):
 		return arcs
 
 root = DepNode(NodeInfo(NodeType.NT, "A"), None)
-
 arcs1 = set()
 random_dep_tree(root, arcs1)
-print_tree(root)
+#print_tree(root)
 
-print()
 rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-RightCornerTransformer.transform(rc_root)
-print_tree(rc_root)
+#RightCornerTransformer.transform(rc_root)
+RightCornerTransformer.partial_transform(root)
+#print_tree(root)
 
-lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-LeftCornerTransformer.transform(lc_root)
-print_tree(lc_root)
 
-exit(0)
+
+
+#print()
+#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+#RightCornerTransformer.transform(rc_root)
+
+
+#lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+#LeftCornerTransformer.transform(lc_root)
+#print_tree(lc_root)
+
 arc_eager = ArcEager()
-arcs2 = arc_eager.convert(rc_root)
+arcs2 = arc_eager.convert(root)
 print(arcs1)
 print(arcs2)
 print(arcs1==arcs2)
