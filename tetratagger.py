@@ -69,9 +69,6 @@ class BottomUpTetratagger(object):
     def convert(self, tree):
         """ convert right-corner transformed tree to shifts and reduces """
         actions = []
-        print_tree(tree, nameattr='label', left_child='left', right_child='right')
-        print()
-        print()
         lc = LeftCornerTransformer.extract_left_corner_no_eps(tree)
 
         print()
