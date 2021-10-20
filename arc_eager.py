@@ -4,6 +4,7 @@ seed = np.random.randint(1000)
 print(seed)
 np.random.seed(seed)
 #np.random.seed(630)
+#np.random.seed(80)
 # right arc example
 #np.random.seed(150)
 #np.random.seed(4)
@@ -68,7 +69,7 @@ class ArcEager(object):
 						print(output)
 						arcs.add(output)
 					else:
-						output = "{0} --> {1}".format(*(l1, sib))
+						output = "{0} --> {1}".format(*(r1, sib))
 						print(output)
 						arcs.add(output)
 					#if l2 == sib:
@@ -164,31 +165,33 @@ class ArcEager(object):
 	
 		return arcs
 
-root = DepNode(NodeInfo(NodeType.NT, "A"), None)
-arcs1 = set()
-random_dep_tree(root, arcs1)
-print_tree(root)
-print()
 
-rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-#RightCornerTransformer.transform(rc_root)
-RightCornerTransformer.partial_transform(root)
-#print_tree(root)
-#exit(0)
+trials = 1000
+for _ in range(trials):
+	root = DepNode(NodeInfo(NodeType.NT, "A"), None)
+	arcs1 = set()
+	random_dep_tree(root, arcs1)
+	
+	print_tree(root)
+	#print()
 
-
-
-#print()
-#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-#RightCornerTransformer.transform(rc_root)
+	#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+	#RightCornerTransformer.transform(rc_root)
+	#RightCornerTransformer.partial_transform(root)
+	#print_tree(root)
+	#exit(0)
 
 
-#lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-#LeftCornerTransformer.transform(lc_root)
-#print_tree(lc_root)
 
-arc_eager = ArcEager()
-arcs2 = arc_eager.convert(root)
-print(arcs1)
-print(arcs2)
-print(arcs1==arcs2)
+	#print()
+	#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+	#RightCornerTransformer.transform(rc_root)
+
+
+	#lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+	#LeftCornerTransformer.transform(lc_root)
+	#print_tree(lc_root)
+
+	arc_eager = ArcEager()
+	arcs2 = arc_eager.convert(root)
+	assert arcs1==arcs2

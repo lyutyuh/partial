@@ -56,7 +56,7 @@ class Transformer:
         # TODO: this should be transform-specific
         if cur.parent is not None:
             rc = cls.extract_left_corner(cur.parent.right)
-            #print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.parent.right.label.split("/")[1]))
+            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.parent.right.label.split("/")[1]))
             if l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
                 touched[cur] = True
                 return True              
