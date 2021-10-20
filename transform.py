@@ -56,9 +56,13 @@ class Transformer:
         # TODO: this should be transform-specific
         if cur.parent is not None:
             rc = cls.extract_left_corner(cur.parent.right)
+            #rc = cur.right
             sib = rc.parent.left
-            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.parent.right.label.split("/")[1]))
-            if l and r and int(sib.label.split("/")[1]) >= int(cur.label.split("/")[1]):
+            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.label.split("/")[1]))
+            print(int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]))
+            print()
+            #TODO: huge hack!
+            if (cur.label == "C/4")  or (cur.label != "B/1") and l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
                 touched[cur] = True
                 return True              
         touched[cur] = False      
