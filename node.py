@@ -5,7 +5,7 @@ class NodeType(Enum):
     NT = 0
     NT_NT = 1
     PT = 2
-    DP = 3
+    DN = 3
 
 
 class NodeInfo:
