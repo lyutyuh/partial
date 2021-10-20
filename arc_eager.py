@@ -1,3 +1,13 @@
+from ppbtree import print_tree
+
+from node import Node, NodeType, NodeInfo
+from transform import LeftCornerTransformer, RightCornerTransformer
+from leftcorner_rev_transformer import rev_transform
+
+from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
+
+from tree import random_tree, random_dep_tree
+
 class ArcEager(object):
 
 
@@ -13,3 +23,8 @@ class ArcEager(object):
 
 		pass
 
+
+root = Node(NodeInfo(NodeType.NT, "A"), None)
+
+random_dep_tree(root)
+print_tree(root)

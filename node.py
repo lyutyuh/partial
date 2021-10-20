@@ -5,6 +5,7 @@ class NodeType(Enum):
     NT = 0
     NT_NT = 1
     PT = 2
+    DP = 3
 
 
 class NodeInfo:
@@ -86,3 +87,17 @@ class NodePair(Node):
 
     def is_eps(self) -> bool:
         return self.node_info1.ref == self.node_info2.ref
+
+
+class DepNode(Node):
+    def __init__(self, node_info: NodeInfo, parent=None, left=None, right=None, dep=None):
+        self.node_info = node_info
+
+        self.left = left
+        self.right = right
+        self.parent = parent
+        self.dep = dep
+
+        # Since it should be an attribute of the node for printing the tree
+        self.label = self.get_label()
+

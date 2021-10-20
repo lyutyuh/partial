@@ -28,6 +28,32 @@ def random_tree(node: Node, label: str, depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
 
 
+def random_dep_tree(node: Node, depth=0, p=.75, cutoff=2, labels=["A", "B", "C", "D", "E", "F", "G"]) -> None:
+    """ sample a random dependency tree """
+
+    left, right = None, None
+    if np.random.binomial(1, p) == 1 and depth < cutoff:
+        # add the left child tree
+        left_label = labels[depth+1]
+        left = Node(NodeInfo(NodeType.DN, left_label), node)
+        node.set_left(left)
+        random_dep_tree(left, depth=depth + 1)
+    else:
+        left = Node(NodeInfo(NodeType.PT, labels[depth+1]), node)
+        node.set_left(left)
+
+    if np.random.binomial(1, p) == 1 and depth < cutoff:
+        # add the right child tree
+        right_label = labels[depth+1]
+        right = Node(NodeInfo(NodeType.DN, right_label), node)
+        node.set_right(right)
+        random_dep_tree(right, depth=depth + 1)
+    else:
+        right = Node(NodeInfo(NodeType.PT, labels[depth+1]), node)
+        node.set_right(right)
+
+
+
 def example_tree_with_labels() -> Node:
     root = Node(NodeInfo(NodeType.NT, "S"), None)
     np = Node(NodeInfo(NodeType.NT, "NP"), root)
