@@ -73,7 +73,7 @@ root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 random_dep_tree(root)
 print_tree(root)
 
-rc_root = Node(NodeInfo(NodeType.NT, "A", ref=root), None)
+rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 RightCornerTransformer.transform(rc_root)
 print_tree(rc_root)
 
