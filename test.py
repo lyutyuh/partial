@@ -1,30 +1,12 @@
-from ppbtree import print_tree
-
 from node import Node, NodeType, NodeInfo
 from transform import LeftCornerTransformer, RightCornerTransformer
-from leftcorner_rev_transformer import rev_transform
 
 from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
 
-from tree import random_tree
+from tree_tools import random_tree
 
 
 
-
-#print_tree(root, nameattr='label', left_child='left', right_child='right')
-
-new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-LeftCornerTransformer.transform(new_root)
-
-rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-RightCornerTransformer.transform(rc_root)
-#print_tree(rc_root, nameattr='label', left_child='left', right_child='right')
-
-rev_new_root = rev_transform(new_root)
-while rev_new_root.parent is not None:
-    rev_new_root = rev_new_root.parent
-
-#print_tree(rev_new_root, nameattr='label', left_child='left', right_child='right')
 
 # TODO: add a pruning method for nodes of the form X-X and its inverse, which I think is possible. Also remove unnecessary unaries
 # TODO: fix tree visualization
