@@ -20,6 +20,7 @@ class ArcEager(object):
 	def convert(self, tree):
 		""" convert right-corner transformed tree to shifts and reduces """
 		#actions = []
+		stop = tree.label
 		print_tree(tree)
 		print()
 		print()
@@ -32,7 +33,7 @@ class ArcEager(object):
 		print(stack)
 		print()
 
-		while len(stack) != 1 or stack[0].label != "S":
+		while len(stack) != 1 or stack[0].label != stop:
 
 			print(stack)
 			node = stack[-1]
@@ -67,7 +68,7 @@ class ArcEager(object):
 			print(stack)
 			print()
 
-		return actions
+		#return actions
 
 root = DepNode(NodeInfo(NodeType.NT, "A"), None)
 
