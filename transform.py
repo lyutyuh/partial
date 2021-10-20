@@ -40,7 +40,8 @@ class Transformer:
             return True
         l = cls._plumb(cur.left, touched)
         r = cls._plumb(cur.right, touched)
-
+        print(cur)
+        print(l, r)
         # TODO: this should be transform-specific
         if l and r and cur.left == cur.dep:
             touched[cur] = True
@@ -51,6 +52,10 @@ class Transformer:
     @classmethod
     def partial_transform(cls, cur:Node) -> None:
         """ partial transform """
+        rc_root = Node(NodeInfo(NodeType.NT, cur.label, ref=cur), None)
+        cls.transform(rc_root)
+        print_tree(rc_root)
+
         for node in cls.plumb(cur):
             rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)
             cls.transform(rc_node)

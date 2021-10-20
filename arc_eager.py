@@ -4,7 +4,7 @@ import numpy as np
 #np.random.seed(150)
 #np.random.seed(4)
 # left arc example
-#np.random.seed(101)
+np.random.seed(101)
 #np.random.seed(9)
 
 from visualize import print_tree
@@ -151,8 +151,8 @@ print_tree(root)
 rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 #RightCornerTransformer.transform(rc_root)
 RightCornerTransformer.partial_transform(root)
-#print_tree(root)
-
+print_tree(root)
+exit(0)
 
 
 
