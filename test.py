@@ -66,17 +66,8 @@ class TetrataggerTest(unittest.TestCase):
         butt = BottomUpTetratagger()
         actions = butt.convert(rc_root)
 
-<<<<<<< HEAD
         # the alternation test
         self.alternate(actions)
-=======
-    def test_top_down(self):
-        print("Please check the top down parse")
-        root = tetratagger_example()
-        new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-        LeftCornerTransformer.transform(new_root)
-        print_tree(new_root)
->>>>>>> b3bafa60a94bd6e91d826944dc7d131c431dbad4
 
     def test_bottom_up_random(self, trials=1000):
         print("Checking the bottom-up tetratagger on {0} random trees".format(trials))
