@@ -105,6 +105,12 @@ class TetrataggerTest(unittest.TestCase):
             # the alternation test
             self.alternate(actions)
 
+    def test_bottom_up_round_trip(self):
+        pass
+
+    def test_top_down_roundd_trip(self):
+        pass
+
 
 if __name__ == '__main__':
     unittest.main()
