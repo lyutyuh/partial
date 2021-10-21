@@ -60,11 +60,17 @@ class TetrataggerTest(unittest.TestCase):
         print("=" * 20)
 
     def test_top_down(self):
+        # TODO: set random seed to debug
+        #import numpy as np
+        #np.random.seed(4)
         print("Please check the top down parse")
         root = Node(NodeInfo(NodeType.NT, "S"), None)
         random_tree(root, depth=3, cutoff=5)
+        print("Original Tree")
+        print_tree(root)
         new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
         LeftCornerTransformer.transform(new_root)
+        print("LC-Transformed Tree")
         print_tree(new_root)
 
         tdtt = TopDownTetratagger()

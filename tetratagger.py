@@ -52,7 +52,7 @@ class TopDownTetratagger(object):
                     actions.append(TetraType.L)
                 if not node.right.is_eps():
                     stack.append(node.right)
-                if not node.left.is_eps:
+                if not node.left.is_eps():
                     stack.append(node.left)
 
         print()

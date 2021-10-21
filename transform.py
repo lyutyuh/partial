@@ -62,7 +62,7 @@ class Transformer:
             print(int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]))
             print()
             #TODO: huge hack!
-            if (cur.label == "C/4")  or (cur.label != "B/1") and l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
+            if l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
                 touched[cur] = True
                 return True              
         touched[cur] = False      

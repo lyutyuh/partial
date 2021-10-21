@@ -3,15 +3,16 @@ import numpy as np
 seed = np.random.randint(1000)
 print(seed)
 np.random.seed(seed)
-np.random.seed(502)
-#np.random.seed(630)
+#np.random.seed(502)
+np.random.seed(630)
 #np.random.seed(80)
 # right arc example
 #np.random.seed(150)
-#np.random.seed(4)
+np.random.seed(4)
 # left arc example
 #np.random.seed(101)
 #np.random.seed(9)
+#np.random.seed(671)
 
 from visualize import print_tree
 
@@ -117,10 +118,10 @@ for _ in range(trials):
 	print_tree(root)
 	#print()
 
-	#rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-	#RightCornerTransformer.transform(rc_root)
-	RightCornerTransformer.partial_transform(root)
-	#print_tree(root)
+	rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+	RightCornerTransformer.transform(rc_root)
+	#RightCornerTransformer.partial_transform(root)
+	print_tree(rc_root)
 	#exit(0)
 
 
@@ -130,10 +131,10 @@ for _ in range(trials):
 	#RightCornerTransformer.transform(rc_root)
 
 
-	#lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-	#LeftCornerTransformer.transform(lc_root)
-	#print_tree(lc_root)
-
+	lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
+	LeftCornerTransformer.transform(lc_root)
+	print_tree(lc_root)
+	exit(0)
 	arc_eager = ArcEager()
 	arcs2 = arc_eager.convert(root)
 	assert arcs1==arcs2
