@@ -58,28 +58,27 @@ class TetrataggerTest(unittest.TestCase):
                 self.assertEqual(result, True)
             last = a
 
-    def test_bottom_up(self):
-        print("Please check the bottom up parse")
-        root = tetratagger_example()
-        rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-        RightCornerTransformer.transform(rc_root)
-        #print_tree(rc_root)
+    def test_bottom_up_random(self, trials=1000):
+        print("Checking the bottom-up tetratagger")
 
-        butt = BottomUpTetratagger()
-        actions = butt.convert(rc_root)
+        for _ in range(trials):
+            #root = tetratagger_example()
+            #rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+            root = Node(NodeInfo(NodeType.NT, "S"), None)
+            random_tree(root, depth=3, cutoff=5)
+            RightCornerTransformer.transform(rc_root)
+    
+            butt = BottomUpTetratagger()
+            actions = butt.convert(rc_root)
 
-        self.alternate(actions)
-        
-        #for a in tetra_visualize(actions):
-        #    print(a)
-        #print("=" * 20)
+            self.alternate(actions)
+    
 
-
-    def test_top_down(self):
+    def test_top_down(self, trials=1000):
         # TODO: set random seed to debug
         #import numpy as np
         #np.random.seed(4)
-        print("Please check the top down parse")
+        print("Checking the top-down tetratagger")
         root = Node(NodeInfo(NodeType.NT, "S"), None)
         random_tree(root, depth=3, cutoff=5)
         #print("Original Tree")
