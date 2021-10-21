@@ -1,5 +1,5 @@
 from node import Node, NodeInfo, NodePair, NodeType
-from visualize import print_tree
+
 
 class Transformer:
     @classmethod
@@ -37,18 +37,17 @@ class Transformer:
         cls.transform(cur.left)
         cls.transform(cur.right)
 
-
     @classmethod
-    def plumb(cls, cur:Node):
+    def plumb(cls, cur: Node):
         touched = {}
         cls._plumb(cur, touched)
         print(touched)
         for node in touched:
             if touched[node] and (node.parent not in touched or not touched[node.parent]):
                 yield node
- 
+
     @classmethod
-    def _plumb(cls, cur:Node, touched):
+    def _plumb(cls, cur: Node, touched):
         if cur.node_info.type == NodeType.PT:
             return True
         l = cls._plumb(cur.left, touched)
@@ -56,25 +55,25 @@ class Transformer:
         # TODO: this should be transform-specific
         if cur.parent is not None:
             rc = cls.extract_left_corner(cur.parent.right)
-            #rc = cur.right
+            # rc = cur.right
             sib = rc.parent.left
-            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]), int(cur.label.split("/")[1]))
+            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]),
+                  int(cur.label.split("/")[1]))
             print(int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]))
             print()
-            #TODO: huge hack!
+            # TODO: huge hack!
             if l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
                 touched[cur] = True
-                return True              
-        touched[cur] = False      
+                return True
+        touched[cur] = False
         return False
 
     @classmethod
-    def partial_transform(cls, cur:Node) -> None:
+    def partial_transform(cls, cur: Node) -> None:
         """ partial transform """
         rc_root = Node(NodeInfo(NodeType.NT, cur.label, ref=cur), None)
-        #cls.transform(rc_root)
-        #print_tree(rc_root)
-
+        # cls.transform(rc_root)
+        # print_tree(rc_root)
 
         for node in cls.plumb(cur):
             rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)
@@ -85,7 +84,6 @@ class Transformer:
             elif node.parent is not None and node == node.parent.right:
                 node.parent.right = rc_node
                 rc_node.parent = node.parent
-
 
 
 class LeftCornerTransformer(Transformer):
@@ -150,5 +148,3 @@ class RightCornerTransformer(Transformer):
 
         node.set_left(new_left_node)
         node.set_right(new_right_node)
-
-
