@@ -2,7 +2,7 @@ import unittest
 
 from node import Node, NodeInfo, NodeType
 from rev_transform import rev_transform
-from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize
+from tetratagger import TopDownTetratagger, BottomUpTetratagger, TetraType, tetra_visualize
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import example_tree_with_labels, is_equal, tetratagger_example, random_tree
 from visualize import print_tree
@@ -46,18 +46,34 @@ class TestRightCornerTransform(unittest.TestCase):
 
 
 class TetrataggerTest(unittest.TestCase):
+
+    def alternate(self, actions):
+        last = actions[0]
+        for a in actions[1:]:
+            if last == TetraType.r or last == TetraType.l:
+                result = a == TetraType.R or a == TetraType.L
+                self.assertEqual(result, True)
+            else:
+                result = a == TetraType.r or a == TetraType.l
+                self.assertEqual(result, True)
+            last = a
+
     def test_bottom_up(self):
         print("Please check the bottom up parse")
         root = tetratagger_example()
         rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
         RightCornerTransformer.transform(rc_root)
-        print_tree(rc_root)
+        #print_tree(rc_root)
 
         butt = BottomUpTetratagger()
         actions = butt.convert(rc_root)
-        for a in tetra_visualize(actions):
-            print(a)
-        print("=" * 20)
+
+        self.alternate(actions)
+        
+        #for a in tetra_visualize(actions):
+        #    print(a)
+        #print("=" * 20)
+
 
     def test_top_down(self):
         # TODO: set random seed to debug
@@ -66,19 +82,20 @@ class TetrataggerTest(unittest.TestCase):
         print("Please check the top down parse")
         root = Node(NodeInfo(NodeType.NT, "S"), None)
         random_tree(root, depth=3, cutoff=5)
-        print("Original Tree")
-        print_tree(root)
+        #print("Original Tree")
+        #print_tree(root)
         new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
         LeftCornerTransformer.transform(new_root)
-        print("LC-Transformed Tree")
-        print_tree(new_root)
+        #print("LC-Transformed Tree")
+        #print_tree(new_root)
 
         tdtt = TopDownTetratagger()
         actions = tdtt.convert(new_root)
+        self.alternate(actions)
 
-        for a in tetra_visualize(actions):
-            print(a)
-        print("=" * 20)
+        # for a in tetra_visualize(actions):
+        #    print(a)
+        #print("=" * 20)
 
 
 if __name__ == '__main__':
