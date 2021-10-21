@@ -68,46 +68,41 @@ class BottomUpTetratagger(object):
         """ convert right-corner transformed tree to shifts and reduces """
         actions = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(tree)
-
-        #print()
         #print("-->\tSHIFT[ {0} ]".format(lc.label))
         actions.append(TetraType.r)
         stack = [lc]
-        #print(stack)
-        #print()
 
         while len(stack) != 1 or stack[0].label != "S":
 
             node = stack[-1]
 
             if node != node.parent.right and node.parent.right is not None:
-                if node.parent.right.node_info.type == NodeType.PT:
-                    #print("-->\tSHIFT[ {0} ]".format(node.parent.right.label))
-                    actions.append(TetraType.r)
-                    stack.append(node.parent.right)
+                lc = LeftCornerTransformer.extract_left_corner_no_eps(node.parent.right)
+                actions.append(TetraType.r)
+                stack.append(lc)
 
-            elif len(stack) >= 2:
+            elif len(stack) >= 2 and stack[-2].node_info.type == NodeType.NT_NT:
                 prev_node = stack[-2]
-                if prev_node.node_info.type == NodeType.NT_NT:
-                    #print("<==\tREDUCE[ {0} {1} --> {2} ]".format(
-                    #    *(prev_node.label, node.label, node.parent.label)))
+                #print("<==\tREDUCE[ {0} {1} --> {2} ]".format(
+                #    *(prev_node.label, node.label, node.parent.label)))
 
-                    if prev_node.node_info2.label == node.label:
-                        actions.pop()
-                        actions.append(TetraType.l)
-                    else:
-                        actions.append(TetraType.L)
-                    stack.pop()
-                    stack.pop()
-                    stack.append(node.parent)
+                if prev_node.node_info2.label == node.label:
+                    actions.pop()
+                    actions.append(TetraType.l)
+                else:
+                    actions.append(TetraType.L)
+                stack.pop()
+                stack.pop()
+                stack.append(node.parent)
 
-            elif len(stack) == 1:
-                if node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
-                    #print(
-                    #    "==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
-                    actions.append(TetraType.R)
-                    stack.pop()
-                    stack.append(node.parent)
+            elif len(stack) == 1 and node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
+                #print(
+                #    "==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
+                actions.append(TetraType.R)
+                stack.pop()
+                stack.append(node.parent)
+            else:
+                print("ERROR")
 
         return actions
 

@@ -58,43 +58,52 @@ class TetrataggerTest(unittest.TestCase):
                 self.assertEqual(result, True)
             last = a
 
-    def test_bottom_up_random(self, trials=1000):
-        print("Checking the bottom-up tetratagger")
+    def test_bottom_up_kitaev(self):
+        print("Checking the bottom-up tetratagger on Kitaev and Klein (2020)'s Figure 1")
+        root = tetratagger_example()
+        rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
 
-        for _ in range(trials):
-            #root = tetratagger_example()
-            #rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+        butt = BottomUpTetratagger()
+        actions = butt.convert(rc_root)
+
+        # the alternation test
+        self.alternate(actions)
+
+    def test_bottom_up_random(self, trials=1000):
+        print("Checking the bottom-up tetratagger on {0} random trees".format(trials))
+
+        import numpy as np
+        np.random.seed(0)
+        for trial in range(trials):
+            #print("trial:\t{0}".format(trial))
+            
             root = Node(NodeInfo(NodeType.NT, "S"), None)
             random_tree(root, depth=3, cutoff=5)
+            rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
             RightCornerTransformer.transform(rc_root)
     
             butt = BottomUpTetratagger()
             actions = butt.convert(rc_root)
 
+            # the alternation test
             self.alternate(actions)
     
 
-    def test_top_down(self, trials=1000):
-        # TODO: set random seed to debug
-        #import numpy as np
-        #np.random.seed(4)
-        print("Checking the top-down tetratagger")
-        root = Node(NodeInfo(NodeType.NT, "S"), None)
-        random_tree(root, depth=3, cutoff=5)
-        #print("Original Tree")
-        #print_tree(root)
-        new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-        LeftCornerTransformer.transform(new_root)
-        #print("LC-Transformed Tree")
-        #print_tree(new_root)
+    def test_top_down_random(self, trials=1000):
+        print("Checking the top-down tetratagger on {0} random trees".format(trials))
 
-        tdtt = TopDownTetratagger()
-        actions = tdtt.convert(new_root)
-        self.alternate(actions)
+        for trial in range(trials):
+            root = Node(NodeInfo(NodeType.NT, "S"), None)
+            random_tree(root, depth=3, cutoff=5)
 
-        # for a in tetra_visualize(actions):
-        #    print(a)
-        #print("=" * 20)
+            lc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+            LeftCornerTransformer.transform(lc_root)
+
+            tdtt = TopDownTetratagger()
+            actions = tdtt.convert(lc_root)
+
+            # the alternation test
+            self.alternate(actions)
 
 
 if __name__ == '__main__':
