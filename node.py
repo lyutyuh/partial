@@ -58,16 +58,47 @@ class Node:
     def update_label(self) -> None:
         self.label = self.node_info.label
 
+    def is_right_child(self) -> bool:
+        if self.parent is None:
+            return False
+        return self.parent.right == self
+
+    def get_sibling(self) -> 'Node':
+        if self.parent is None:
+            return None
+        return self.parent.left if self.is_right_child() else self.parent.right
+
     def is_eps(self) -> bool:
         """ Predicate that returns true for nodes of the type X-X """
         if self.node_info.type != NodeType.NT_NT:
             return False
+
+    @staticmethod
+    def is_topo_eq(node1: 'Node', node2: 'Node') -> bool:
+        if node1 is None and node2 is not None:
+            return False
+        if node1 is not None and node2 is None:
+            return False
+        if node1 is None and node2 is None:
+            return True
+        return Node.is_topo_eq(node1.left, node2.left) and Node.is_topo_eq(node1.right, node2.right)
 
     def __str__(self) -> str:
         return self.label
 
     def __repr__(self) -> str:
         return self.label
+
+    def __eq__(self, other):
+        if self is None and other is not None:
+            return False
+        if self is not None and other is None:
+            return False
+        if self is None and other is None:
+            return True
+        if self.label != other.label:
+            return False
+        return self.left == other.left and self.right == other.right
 
 
 class NodePair(Node):

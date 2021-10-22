@@ -1,20 +1,26 @@
+import random
+import string
+
 import numpy as np
-from node import Node, DepNode, NodeType, NodeInfo
 
-LABELS = ["A", "B", "C", "D", "E", "F", "G"]
+from node import Node, NodeType, NodeInfo
 
 
-def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
-    """ sample a random tree """
+def random_tree(node: Node, input_str: [str], depth=0, p=.75, cutoff=7) -> None:
+    """ sample a random tree
+    @param input_str: list of sampled terminals
+    """
     np.random.seed(7)
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = "X/" + str(depth)
         left = Node(NodeInfo(NodeType.NT, left_label), node)
         node.set_left(left)
-        random_tree(left, depth=depth + 1)
+        random_tree(left, input_str, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        left = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
+        label = random.choice(string.ascii_letters)
+        input_str.append(label)
+        left = Node(NodeInfo(NodeType.PT, label), node)
         node.set_left(left)
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
@@ -22,63 +28,12 @@ def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
         right_label = "X/" + str(depth)
         right = Node(NodeInfo(NodeType.NT, right_label), node)
         node.set_right(right)
-        random_tree(right, depth=depth + 1)
+        random_tree(right, input_str, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        right = Node(NodeInfo(NodeType.PT, "X/" + str(depth)), node)
+        label = random.choice(string.ascii_letters)
+        input_str.append(label)
+        right = Node(NodeInfo(NodeType.PT, label), node)
         node.set_right(right)
-
-
-def random_dep_tree(node: DepNode, arcs, counter=1, depth=0, p=.75, cutoff=2, sep="/") -> int:
-    """ sample a random dependency tree """
-
-    np.random.seed(7)
-    if np.random.binomial(1, p) == 1 and depth < cutoff:
-        # add the left child tree
-
-        left_label = LABELS[depth + 1]
-        left = DepNode(NodeInfo(NodeType.NT, left_label), node)
-        node.set_left(left)
-        counter = random_dep_tree(left, arcs, counter=counter, depth=depth+1)
-    else:
-        left = DepNode(NodeInfo(NodeType.PT, LABELS[depth+1]+sep+str(counter)), node)
-        node.set_left(left)
-        counter += 1
-
-    if np.random.binomial(1, p) == 1 and depth < cutoff:
-        # add the right child tree
-        right_label = LABELS[depth+1]
-        right = DepNode(NodeInfo(NodeType.NT, right_label), node)
-        node.set_right(right)
-        counter = random_dep_tree(right, arcs, counter=counter, depth=depth + 1)
-    else:
-        right = DepNode(NodeInfo(NodeType.PT, LABELS[depth+1]+sep+str(counter)), node)
-        node.set_right(right)
-        counter += 1
-
-    # randomly sample dependent
-    one, two = node.right.node_info.label.split(sep)[1], node.left.node_info.label.split(sep)[1]
-    if np.random.binomial(1, .5) == 1:
-        node.set_dep(node.right)
-        node.node_info.label = node.node_info.label + sep + one
-        node.update_label()
-        arcs.add(two + " <-- " + one)
-        #one, two = int(one), int(two)
-        #if one >= two:
-        #    arcs.add((one, two))
-        #else:
-        #    add.arcs((two, one))
-    else:
-        node.set_dep(node.left)    
-        node.node_info.label = node.node_info.label + sep + two
-        node.update_label()
-        arcs.add(two + " --> " + one)
-        #one, two = int(one), int(two)
-        #if one >= two:
-        #    arcs.add((one, two))
-        #else:
-        #    add.arcs((two, one))
-
-    return counter
 
 
 def example_tree_with_labels() -> Node:
@@ -142,15 +97,3 @@ def tetratagger_example() -> Node:
     three.set_left(C)
     three.set_right(D)
     return root
-
-
-def is_equal(node1: Node, node2: Node) -> bool:
-    if node1 is None and node2 is not None:
-        return False
-    if node1 is not None and node2 is None:
-        return False
-    if node1 is None and node2 is None:
-        return True
-    if node1.label != node2.label:
-        return False
-    return is_equal(node1.left, node2.left) and is_equal(node1.right, node2.right)
