@@ -125,10 +125,16 @@ class TetrataggerTest(unittest.TestCase):
             tdtt = TopDownTetratagger()
             actions_tdtt = tdtt.convert(lc_root)
 
+            d = {}
+            for a1, a2 in zip(actions_tdtt, actions_butt):
+                if (a1, a2) not in d:
+                    d[(a1, a2)] = 0
+                d[(a1, a2)] += 1
 
-            #print(actions_tdtt[:5])
-            #print(actions_butt[:5])
-            #exit(0)
+
+            print_tree(root)
+
+            print(d)
 
 
     def test_bottom_up_round_trip(self):

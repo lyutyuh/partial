@@ -6,7 +6,7 @@ LABELS = ["A", "B", "C", "D", "E", "F", "G"]
 
 def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree """
-    np.random.seed(7)
+
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = "X/" + str(depth)
@@ -31,7 +31,6 @@ def random_tree(node: Node, depth=0, p=.75, cutoff=7) -> None:
 def random_dep_tree(node: DepNode, arcs, counter=1, depth=0, p=.75, cutoff=2, sep="/") -> int:
     """ sample a random dependency tree """
 
-    np.random.seed(7)
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
 
