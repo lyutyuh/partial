@@ -68,7 +68,6 @@ class BottomUpTetratagger(object):
         """ convert right-corner transformed tree to shifts and reduces """
         actions = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(tree)
-        #print("-->\tSHIFT[ {0} ]".format(lc.label))
         actions.append(TetraType.r)
         stack = [lc]
 
@@ -83,9 +82,6 @@ class BottomUpTetratagger(object):
 
             elif len(stack) >= 2 and stack[-2].node_info.type == NodeType.NT_NT:
                 prev_node = stack[-2]
-                #print("<==\tREDUCE[ {0} {1} --> {2} ]".format(
-                #    *(prev_node.label, node.label, node.parent.label)))
-
                 if prev_node.node_info2.label == node.label:
                     actions.pop()
                     actions.append(TetraType.l)
@@ -96,8 +92,6 @@ class BottomUpTetratagger(object):
                 stack.append(node.parent)
 
             elif len(stack) == 1 and node.node_info.type == NodeType.PT or node.node_info.type == NodeType.NT:
-                #print(
-                #    "==>\tREDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
                 actions.append(TetraType.R)
                 stack.pop()
                 stack.append(node.parent)

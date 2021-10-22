@@ -105,6 +105,32 @@ class TetrataggerTest(unittest.TestCase):
             # the alternation test
             self.alternate(actions)
 
+    def test_equiv_random(self, trials=1000):
+
+        for trial in range(trials):
+            #print("trial:\t{0}".format(trial))
+            
+            root = Node(NodeInfo(NodeType.NT, "S"), None)
+            random_tree(root, depth=3, cutoff=5)
+
+            rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+            RightCornerTransformer.transform(rc_root)
+    
+            lc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+            LeftCornerTransformer.transform(lc_root)
+
+            butt = BottomUpTetratagger()
+            actions_butt = butt.convert(rc_root)
+
+            tdtt = TopDownTetratagger()
+            actions_tdtt = tdtt.convert(lc_root)
+
+
+            #print(actions_tdtt[:5])
+            #print(actions_butt[:5])
+            #exit(0)
+
+
     def test_bottom_up_round_trip(self):
         pass
 
