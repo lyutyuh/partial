@@ -127,12 +127,10 @@ class TetrataggerTest(unittest.TestCase):
 
             d = {}
             for a1, a2 in zip(actions_tdtt, actions_butt):
-                if (a1, a2) not in d:
-                    d[(a1, a2)] = 0
-                d[(a1, a2)] += 1
+                if (a1.name, a2.name) not in d:
+                    d[(a1.name, a2.name)] = 0
+                d[(a1.name, a2.name)] += 1
 
-
-            print_tree(root)
 
             print(d)
 
