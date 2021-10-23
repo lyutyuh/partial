@@ -3,6 +3,8 @@ from enum import Enum
 from node import Node, NodeType
 from transform import LeftCornerTransformer
 
+from visualize import print_tree
+
 
 class TetraType(Enum):
     r = 0
@@ -25,24 +27,20 @@ class TopDownTetratagger(object):
 
             if node.node_info.type == NodeType.NT:
                 stack.pop()
-                #print("==>\tREDUCE[ {0} --> {1} {2}]".format(
-                ##    *(node.label, node.left.label, node.right.label)))
                 actions.append(TetraType.R)
 
-                if not node.right.is_eps():
+
+                if node.right is not None and not node.right.is_eps():
                     stack.append(node.right)
-                if not node.left.is_eps():
+                if node.left is not None and not node.left.is_eps():
                     stack.append(node.left)
 
             elif node.node_info.type == NodeType.PT:
                 actions.append(TetraType.r)
-                #print("-->\tSHIFT[ {0} ]".format(node.label))
                 stack.pop()
 
             elif node.node_info.type == NodeType.NT_NT:
                 stack.pop()
-                #print("<==\tREDUCE[ {0} --> {1} {2}]".format(
-                #    *(node.label, node.left.label, node.right.label)))
 
                 # did I build a complete constituent?
                 if node.left.node_info.type == NodeType.NT:
@@ -72,6 +70,7 @@ class BottomUpTetratagger(object):
         stack = [lc]
 
         while len(stack) != 1 or stack[0].label != "S":
+
 
             node = stack[-1]
 

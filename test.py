@@ -58,15 +58,31 @@ class TetrataggerTest(unittest.TestCase):
                 self.assertEqual(result, True)
             last = a
 
+
+    def test_top_down_kitaev(self):
+        print("Checking the top-down tetratagger on Kitaev and Klein (2020)'s Figure 1")
+        root = tetratagger_example()
+        lc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+        LeftCornerTransformer.transform(lc_root)
+
+        tdtt = TopDownTetratagger()
+        actions = tdtt.convert(lc_root)
+
+        # the alternation test
+        self.alternate(actions)
+
+
     def test_bottom_up_kitaev(self):
         print("Checking the bottom-up tetratagger on Kitaev and Klein (2020)'s Figure 1")
         root = tetratagger_example()
         rc_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
+        RightCornerTransformer.transform(rc_root)
 
-        butt = BottomUpTetratagger()
-        actions = butt.convert(rc_root)
+        tdtt = BottomUpTetratagger()
+        actions = tdtt.convert(rc_root)
 
-        # the alternation test
+        #print(actions)
+
         self.alternate(actions)
 
     def test_bottom_up_random(self, trials=1000):
@@ -132,7 +148,7 @@ class TetrataggerTest(unittest.TestCase):
                 d[(a1.name, a2.name)] += 1
 
 
-            print(d)
+            #print(d)
 
 
     def test_bottom_up_round_trip(self):

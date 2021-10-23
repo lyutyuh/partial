@@ -120,7 +120,7 @@ def example_tree_without_labels() -> Node:
 
 
 def tetratagger_example() -> Node:
-    root = Node(NodeInfo(NodeType.NT, "4"), None)
+    root = Node(NodeInfo(NodeType.NT, "S"), None)
     one = Node(NodeInfo(NodeType.NT, "1"), root)
     E = Node(NodeInfo(NodeType.PT, "E"), root)
     root.set_left(one)
