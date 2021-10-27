@@ -26,8 +26,8 @@ class TetraTagger:
         raise NotImplementedError("tree to tags is not implemented")
 
     @classmethod
-    def decide_tag(cls, sr_action: SRAction, node: Node) -> TetraType:
-        raise NotImplementedError("decide tags is not implemented")
+    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+        raise NotImplementedError("tags to tree is not implemented")
 
     @classmethod
     def tetra_visualize(cls, actions: [TetraType]):
@@ -119,55 +119,62 @@ class BottomUpTetratagger(TetraTagger):
         return node
 
 
-class TopDownTetratagger(object):
+class TopDownTetratagger(TetraTagger):
 
-    def __init__(self):
-        pass
-
-    def convert(self, root: Node):
+    @classmethod
+    def tree_to_tags(cls, root: Node) -> [TetraType]:
         """ convert left-corner transformed tree to shifts and reduces """
-        actions = []
         stack: [Node] = [root]
+        logging.debug("SHIFT {}".format(root.label))
+        tags = []
         while len(stack) > 0:
             node = stack[-1]
 
-            print(stack)
-            if node.node_info.type == NodeType.NT:
+            if node.node_info.type == NodeType.NT or node.node_info.type == NodeType.NT_NT:
                 stack.pop()
-                print("==>\tREDUCE[ {0} --> {1} {2}]".format(
+                logging.debug("REDUCE[ {0} --> {1} {2}]".format(
                     *(node.label, node.left.label, node.right.label)))
-                actions.append(TetraType.R)
-
                 if not node.right.is_eps():
                     stack.append(node.right)
-                if not node.left.is_eps():
-                    stack.append(node.left)
+                    tags.append(TetraType.R)  # normal reduce
+                else:
+                    tags.append(TetraType.L)  # unary reduce
+                stack.append(node.left)
 
             elif node.node_info.type == NodeType.PT:
-                actions.append(TetraType.r)
-                print("-->\tSHIFT[ {0} ]".format(node.label))
+                tags.append(TetraType.r)  # shift
+                logging.debug("-->\tSHIFT[ {0} ]".format(node.label))
                 stack.pop()
 
-            elif node.node_info.type == NodeType.NT_NT:
-                stack.pop()
-                print("<==\tREDUCE[ {0} --> {1} {2}]".format(
-                    *(node.label, node.left.label, node.right.label)))
+        return tags
 
-                # did I build a complete constituent?
-                if node.left.node_info.type == NodeType.NT:
-                    actions.pop()
-                    actions.append(TetraType.r)
-                    print("???")
+    @classmethod
+    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+        root = Node(NodeInfo(NodeType.NT, "X"), None)
+        created_node_stack = [root]
+        for tag in tags:
+            if tag == TetraType.r:  # shift
+                node = created_node_stack.pop()
+                node.update_node_info(NodeType.PT, input_seq[0])
+                input_seq.pop(0)
+            elif tag == TetraType.R or tag == TetraType.L:
+                parent = created_node_stack.pop()
+                if tag == TetraType.R:  # normal reduce
+                    r_node = Node(NodeInfo(NodeType.NT, "X"), parent)
+                    created_node_stack.append(r_node)
                 else:
-                    actions.append(TetraType.L)
-                if not node.right.is_eps():
-                    stack.append(node.right)
-                if not node.left.is_eps():
-                    stack.append(node.left)
+                    node_info = NodeInfo(NodeType.NT, "X")
+                    r_node = NodePair(node_info, node_info, parent)
+
+                l_node = Node(NodeInfo(NodeType.NT, "X"), parent)
+                created_node_stack.append(l_node)
+                parent.set_left(l_node)
+                parent.set_right(r_node)
+
+            else:
+                raise ValueError("Invalid tag type")
+        if len(input_seq) != 0:
+            raise ValueError("All the input sequence is not used")
+        return root
 
 
-
-            print(stack)
-            print()
-
-        return actions

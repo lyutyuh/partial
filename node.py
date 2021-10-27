@@ -58,6 +58,11 @@ class Node:
     def update_label(self) -> None:
         self.label = self.node_info.label
 
+    def update_node_info(self, type, label) -> None:
+        self.node_info.type = type
+        self.node_info.label = label
+        self.update_label()
+
     def is_right_child(self) -> bool:
         if self.parent is None:
             return False

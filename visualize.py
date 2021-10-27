@@ -1,6 +1,6 @@
 def print_tree(root, val="label", left="left", right="right"):
     """
-Copy from https://www.py4u.net/discuss/21639: answer #5
+Code snippet from https://www.py4u.net/discuss/21639: answer #5
     @param root: root of the tree
     @param val: value that should represent each node
     @param left: left child
