@@ -114,7 +114,7 @@ class LeftCornerTransformer(Transformer):
         new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node),
                                   parent=node)
 
-        sibling_node = node.node_info2.ref.parent.right
+        sibling_node = node.node_info2.ref.get_sibling()
         sibling_node_info = NodeInfo(sibling_node.node_info.type,
                                      sibling_node.node_info.label,
                                      ref=sibling_node)
@@ -143,7 +143,7 @@ class RightCornerTransformer(Transformer):
         new_left_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node),
                                  parent=node)
 
-        sibling_node = node.node_info2.ref.parent.left
+        sibling_node = node.node_info2.ref.get_sibling()
         new_right_node = Node(sibling_node.node_info.copy(sibling_node), parent=node)
 
         node.set_left(new_left_node)
