@@ -25,18 +25,20 @@ class TopDownTetratagger(object):
         while len(stack) > 0:
             node = stack[-1]
 
+            print(stack)
             if node.node_info.type == NodeType.NT:
                 stack.pop()
                 actions.append(TetraType.R)
-
+                print("LEFT-CHILD")
 
                 if node.right is not None and not node.right.is_eps():
                     stack.append(node.right)
                 if node.left is not None and not node.left.is_eps():
                     stack.append(node.left)
 
-            elif node.node_info.type == NodeType.PT:
-                actions.append(TetraType.r)
+            elif node.node_info.type == NodeType.PT and node == node.parent.left:
+                actions.append(TetraType.l)
+                print("SHIFT")
                 stack.pop()
 
             elif node.node_info.type == NodeType.NT_NT:
@@ -45,13 +47,19 @@ class TopDownTetratagger(object):
                 # did I build a complete constituent?
                 if node.left.node_info.type == NodeType.NT:
                     actions.pop()
-                    actions.append(TetraType.l)
+                    actions.append(TetraType.r)
+                    print("???")
                 else:
                     actions.append(TetraType.L)
                 if not node.right.is_eps():
                     stack.append(node.right)
                 if not node.left.is_eps():
                     stack.append(node.left)
+
+
+
+            print(stack)
+            print()
 
         return actions
 

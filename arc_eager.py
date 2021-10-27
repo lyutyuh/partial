@@ -20,7 +20,7 @@ from node import Node, DepNode, NodeType, NodeInfo
 from transform import LeftCornerTransformer, RightCornerTransformer
 #from rev_transformer import rev_transform
 
-from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize, tetra_alternate
+from tetratagger import TopDownTetratagger, BottomUpTetratagger, tetra_visualize
 
 from tree_tools import random_tree, random_dep_tree
 
@@ -118,6 +118,7 @@ for _ in range(trials):
 	print_tree(root)
 	#print()
 
+	print()
 	rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 	RightCornerTransformer.transform(rc_root)
 	#RightCornerTransformer.partial_transform(root)
@@ -133,6 +134,7 @@ for _ in range(trials):
 
 	lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
 	LeftCornerTransformer.transform(lc_root)
+	print()
 	print_tree(lc_root)
 	exit(0)
 	arc_eager = ArcEager()
