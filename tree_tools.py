@@ -10,7 +10,6 @@ def random_tree(node: Node, input_str: [str], depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree
     @param input_str: list of sampled terminals
     """
-    np.random.seed(7)
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = "X/" + str(depth)

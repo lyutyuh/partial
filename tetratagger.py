@@ -30,16 +30,40 @@ class TetraTagger:
         raise NotImplementedError("tags to tree is not implemented")
 
     @classmethod
-    def tetra_visualize(cls, actions: [TetraType]):
-        for a in actions:
-            if a == TetraType.r:
+    def tetra_visualize(cls, tags: [TetraType]):
+        for tag in tags:
+            if tag == TetraType.r:
                 yield "-->"
-            if a == TetraType.l:
+            if tag == TetraType.l:
                 yield "<--"
-            if a == TetraType.R:
+            if tag == TetraType.R:
                 yield "==>"
-            if a == TetraType.L:
+            if tag == TetraType.L:
                 yield "<=="
+
+    @classmethod
+    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+        new_tags = []
+        for tag in tags:
+            if tag == TetraType.l:
+                new_tags.append(TetraType.r)
+                new_tags.append(TetraType.R)
+            else:
+                new_tags.append(tag)
+        return new_tags
+
+    @classmethod
+    def is_alternating(cls, tags: [TetraType]) -> bool:
+        prev_state = True #true means reduce
+        for tag in tags:
+            if tag == TetraType.r or tag == TetraType.l:
+                state = False
+            else:
+                state = True
+            if state == prev_state:
+                return False
+            prev_state = state
+        return True
 
 
 class BottomUpTetratagger(TetraTagger):
@@ -55,11 +79,19 @@ class BottomUpTetratagger(TetraTagger):
 
         while len(stack) != 1 or stack[0].label != root.label:
             node = stack[-1]
+            if node.node_info.type == NodeType.NT:  # special case: merge the reduce and last shift
+                last_tag = tags.pop()
+                last_two_tag = tags.pop()
+                if last_tag != TetraType.R or last_two_tag != TetraType.r:
+                    raise ValueError(
+                        "When reaching NT the right PT should already be shifted")
+                tags.append(TetraType.l)  # merged shift
+
             if not node.is_right_child() and node.parent.right is not None:
                 lc = LeftCornerTransformer.extract_left_corner_no_eps(node.parent.right)
                 stack.append(lc)
                 logging.debug("--> \t SHIFT {}".format(lc))
-                tags.append(TetraType.r)
+                tags.append(TetraType.r)  # normal shift
 
             elif len(stack) >= 2 and node.get_sibling() == stack[-2]:
                 prev_node = stack[-2]
@@ -101,7 +133,8 @@ class BottomUpTetratagger(TetraTagger):
     def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
         created_node_stack = []
         node = None
-        for tag in tags:
+        expanded_tags = cls.expand_tags(tags)
+        for tag in expanded_tags:
             if tag == TetraType.r:  # shift
                 created_node_stack.append(Node(NodeInfo(NodeType.PT, input_seq[0]), None))
                 input_seq.pop(0)
@@ -176,5 +209,3 @@ class TopDownTetratagger(TetraTagger):
         if len(input_seq) != 0:
             raise ValueError("All the input sequence is not used")
         return root
-
-

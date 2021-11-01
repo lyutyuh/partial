@@ -171,6 +171,22 @@ class TetrataggerTest(unittest.TestCase):
 
             self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
 
+    def test_alternation_and_length(self, trials=100):
+        for trial in range(trials):
+            root = Node(NodeInfo(NodeType.NT, "ROOT"), None)
+            input_str = []
+            random_tree(root, input_str, depth=0, cutoff=2)
+            n = len(input_str)
+
+            rc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
+            RightCornerTransformer.transform(rc_root)
+
+            tagger = BottomUpTetratagger()
+            tags = tagger.tree_to_tags(rc_root)
+
+            self.assertTrue(tagger.is_alternating(tags))
+            self.assertTrue(2*n == len(tags))
+
 
 if __name__ == '__main__':
     unittest.main()
