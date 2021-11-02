@@ -179,13 +179,19 @@ class TetrataggerTest(unittest.TestCase):
             n = len(input_str)
 
             rc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
+            lc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
             RightCornerTransformer.transform(rc_root)
+            LeftCornerTransformer.transform(lc_root)
 
-            tagger = BottomUpTetratagger()
-            tags = tagger.tree_to_tags(rc_root)
+            tagger_bu = BottomUpTetratagger()
+            tagger_td = TopDownTetratagger()
+            tags_bu = tagger_bu.tree_to_tags(rc_root)
+            tags_td = tagger_td.tree_to_tags(lc_root)
 
-            self.assertTrue(tagger.is_alternating(tags))
-            self.assertTrue(2*n == len(tags))
+            self.assertTrue(tagger_bu.is_alternating(tags_bu))
+            self.assertTrue(tagger_td.is_alternating(tags_td))
+            self.assertTrue(2*n == len(tags_bu))
+            self.assertTrue((2*n-1) == len(tags_td))
 
 
 if __name__ == '__main__':

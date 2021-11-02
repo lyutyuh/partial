@@ -30,6 +30,10 @@ class TetraTagger:
         raise NotImplementedError("tags to tree is not implemented")
 
     @classmethod
+    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+        raise NotImplementedError("expand tags is not implemented")
+
+    @classmethod
     def tetra_visualize(cls, tags: [TetraType]):
         for tag in tags:
             if tag == TetraType.r:
@@ -42,19 +46,8 @@ class TetraTagger:
                 yield "<=="
 
     @classmethod
-    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
-        new_tags = []
-        for tag in tags:
-            if tag == TetraType.l:
-                new_tags.append(TetraType.r)
-                new_tags.append(TetraType.R)
-            else:
-                new_tags.append(tag)
-        return new_tags
-
-    @classmethod
     def is_alternating(cls, tags: [TetraType]) -> bool:
-        prev_state = True #true means reduce
+        prev_state = True  # true means reduce
         for tag in tags:
             if tag == TetraType.r or tag == TetraType.l:
                 state = False
@@ -68,6 +61,17 @@ class TetraTagger:
 
 class BottomUpTetratagger(TetraTagger):
     """ Kitaev and Klein (2020)"""
+
+    @classmethod
+    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+        new_tags = []
+        for tag in tags:
+            if tag == TetraType.l:
+                new_tags.append(TetraType.r)
+                new_tags.append(TetraType.R)
+            else:
+                new_tags.append(tag)
+        return new_tags
 
     @classmethod
     def tree_to_tags(cls, root: Node) -> []:
@@ -153,6 +157,16 @@ class BottomUpTetratagger(TetraTagger):
 
 
 class TopDownTetratagger(TetraTagger):
+    @classmethod
+    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+        new_tags = []
+        for tag in tags:
+            if tag == TetraType.l:
+                new_tags.append(TetraType.R)
+                new_tags.append(TetraType.r)
+            else:
+                new_tags.append(tag)
+        return new_tags
 
     @classmethod
     def tree_to_tags(cls, root: Node) -> [TetraType]:
@@ -162,20 +176,27 @@ class TopDownTetratagger(TetraTagger):
         tags = []
         while len(stack) > 0:
             node = stack[-1]
-
             if node.node_info.type == NodeType.NT or node.node_info.type == NodeType.NT_NT:
                 stack.pop()
                 logging.debug("REDUCE[ {0} --> {1} {2}]".format(
                     *(node.label, node.left.label, node.right.label)))
-                if not node.right.is_eps():
+                if node.node_info.type == NodeType.NT:
+                    if node.left is None:
+                        raise ValueError("Left child of NT should not be none")
+                    if node.left.node_info.type != NodeType.PT:
+                        raise ValueError("Left child of NT should be a PT")
                     stack.append(node.right)
-                    tags.append(TetraType.R)  # normal reduce
+                    tags.append(TetraType.l)  # merged shift
                 else:
-                    tags.append(TetraType.L)  # unary reduce
-                stack.append(node.left)
+                    if not node.right.is_eps():
+                        stack.append(node.right)
+                        tags.append(TetraType.R)  # normal reduce
+                    else:
+                        tags.append(TetraType.L)  # unary reduce
+                    stack.append(node.left)
 
             elif node.node_info.type == NodeType.PT:
-                tags.append(TetraType.r)  # shift
+                tags.append(TetraType.r)  # normal shift
                 logging.debug("-->\tSHIFT[ {0} ]".format(node.label))
                 stack.pop()
 
@@ -183,9 +204,10 @@ class TopDownTetratagger(TetraTagger):
 
     @classmethod
     def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+        expanded_tags = cls.expand_tags(tags)
         root = Node(NodeInfo(NodeType.NT, "X"), None)
         created_node_stack = [root]
-        for tag in tags:
+        for tag in expanded_tags:
             if tag == TetraType.r:  # shift
                 node = created_node_stack.pop()
                 node.update_node_info(NodeType.PT, input_seq[0])
