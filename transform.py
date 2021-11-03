@@ -1,150 +1,118 @@
-from node import Node, NodeInfo, NodePair, NodeType
+from node import Node, NodePair, NodeType
+from nltk import ParentedTree as Tree
+
+
+def find_type(node: Tree):
+    if len(node) == 1:
+        return NodeType.PT
+    elif node.label().find("\\") != -1:
+        return NodeType.NT_NT
+    else:
+        return NodeType.NT
 
 
 class Transformer:
     @classmethod
-    def expand_nt(cls, node: Node) -> None:
+    def expand_nt(cls, node: Tree, ref_node: Tree) -> (Tree, Tree, Tree, Tree):
         raise NotImplementedError("expand non-terminal is not implemented")
 
     @classmethod
-    def expand_nt_nt(cls, node: NodePair) -> None:
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
         raise NotImplementedError("expand paired non-terimnal is not implemented")
 
     @classmethod
-    def extract_right_corner(cls, node: Node) -> Node:
-        while node.right is not None:
-            node = node.right
+    def extract_right_corner(cls, node: Tree) -> Tree:
+        while len(node) > 1:
+            node = node[1]
         return node
 
     @classmethod
-    def extract_left_corner(cls, node: Node) -> Node:
-        while node.left is not None:
-            node = node.left
+    def extract_left_corner(cls, node: Tree) -> Tree:
+        while len(node) > 1:
+            node = node[0]
         return node
 
     @classmethod
-    def transform(cls, cur: Node) -> None:
-        if cur is None:
+    def transform(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> None:
+        if node is None:
             return
-        if cur.node_info.type == NodeType.NT:
-            cls.expand_nt(cur)
-        elif cur.node_info.type == NodeType.NT_NT:
-            assert isinstance(cur, NodePair)
-            if not cur.is_eps():
-                cls.expand_nt_nt(cur)
+        type = find_type(node)
+        if type == NodeType.NT:
+            left_ref1, left_ref2, right_ref1, right_ref2 = cls.expand_nt(node, ref_node1)
+        elif type == NodeType.NT_NT:
+            left_ref1, left_ref2, right_ref1, right_ref2 = cls.expand_nt_nt(node, ref_node1, ref_node2)
         else:
             return
-        cls.transform(cur.left)
-        cls.transform(cur.right)
-
-    @classmethod
-    def plumb(cls, cur: Node):
-        touched = {}
-        cls._plumb(cur, touched)
-        print(touched)
-        for node in touched:
-            if touched[node] and (node.parent not in touched or not touched[node.parent]):
-                yield node
-
-    @classmethod
-    def _plumb(cls, cur: Node, touched):
-        if cur.node_info.type == NodeType.PT:
-            return True
-        l = cls._plumb(cur.left, touched)
-        r = cls._plumb(cur.right, touched)
-        # TODO: this should be transform-specific
-        if cur.parent is not None:
-            rc = cls.extract_left_corner(cur.parent.right)
-            # rc = cur.right
-            sib = rc.parent.left
-            print(cur, rc.label, r, cur.parent, l, int(rc.label.split("/")[1]),
-                  int(cur.label.split("/")[1]))
-            print(int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]))
-            print()
-            # TODO: huge hack!
-            if l and r and int(rc.label.split("/")[1]) >= int(cur.label.split("/")[1]):
-                touched[cur] = True
-                return True
-        touched[cur] = False
-        return False
-
-    @classmethod
-    def partial_transform(cls, cur: Node) -> None:
-        """ partial transform """
-        rc_root = Node(NodeInfo(NodeType.NT, cur.label, ref=cur), None)
-        # cls.transform(rc_root)
-        # print_tree(rc_root)
-
-        for node in cls.plumb(cur):
-            rc_node = Node(NodeInfo(NodeType.NT, node.label, ref=node), None)
-            cls.transform(rc_node)
-            if node.parent is not None and node == node.parent.left:
-                node.parent.left = rc_node
-                rc_node.parent = node.parent
-            elif node.parent is not None and node == node.parent.right:
-                node.parent.right = rc_node
-                rc_node.parent = node.parent
+        cls.transform(node[0], left_ref1, left_ref2)
+        cls.transform(node[1], right_ref1, right_ref2)
 
 
 class LeftCornerTransformer(Transformer):
 
     @classmethod
-    def extract_left_corner_no_eps(cls, node: Node) -> Node:
-        while node.left is not None:
+    def extract_left_corner_no_eps(cls, node: Tree) -> Tree:
+        while len(node) > 1:
             if not node.left.is_eps():
-                node = node.left
+                node = node[0]
             else:
-                node = node.right
+                node = node[1]
         return node
 
     @classmethod
-    def expand_nt(cls, node: Node):
-        leftcorner_node = cls.extract_left_corner(node.node_info.ref)
-        leftcorner_node_info = leftcorner_node.node_info.copy(leftcorner_node)
+    def expand_nt(cls, node: Tree, ref_node: Tree) -> (Tree, Tree, Tree, Tree):
+        leftcorner_node = cls.extract_left_corner(ref_node)
+        new_right_node = Tree(node.label() + "\\" + leftcorner_node.label(), [])
+        new_left_node = Tree(leftcorner_node.label(), leftcorner_node.leaves())
 
-        new_right_node = NodePair(node.node_info, leftcorner_node_info, parent=node)
-        new_left_node = Node(leftcorner_node_info, node)
-
-        node.set_left(new_left_node)
-        node.set_right(new_right_node)
+        node.insert(0, new_left_node)
+        node.insert(1, new_right_node)
+        return leftcorner_node, leftcorner_node, ref_node, leftcorner_node
 
     @classmethod
-    def expand_nt_nt(cls, node: NodePair) -> None:
-        parent_node = node.node_info2.ref.parent
-        new_right_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node),
-                                  parent=node)
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
+        parent_node = ref_node2.parent()
+        if ref_node1 == parent_node:
+            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), ["EPS"])
+        else:
+            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), [])
 
-        sibling_node = node.node_info2.ref.get_sibling()
-        sibling_node_info = NodeInfo(sibling_node.node_info.type,
-                                     sibling_node.node_info.label,
-                                     ref=sibling_node)
-        new_left_node = Node(sibling_node_info, parent=node)
+        sibling_node = ref_node2.right_sibling()
+        if len(sibling_node) == 1:
+            new_left_node = Tree(sibling_node.label(), sibling_node.leaves())
+        else:
+            new_left_node = Tree(sibling_node.label(), [])
 
-        node.set_left(new_left_node)
-        node.set_right(new_right_node)
+        node.insert(0, new_left_node)
+        node.insert(1, new_right_node)
+        return sibling_node, sibling_node, ref_node1, parent_node
 
 
 class RightCornerTransformer(Transformer):
 
     @classmethod
-    def expand_nt(cls, node: Node) -> None:
-        rightcorner_node = cls.extract_right_corner(node.node_info.ref)
-        rightcorner_node_info = rightcorner_node.node_info.copy(rightcorner_node)
+    def expand_nt(cls, node: Tree, ref_node: Tree) -> (Tree, Tree, Tree, Tree):
+        rightcorner_node = cls.extract_right_corner(ref_node)
+        new_left_node = Tree(node.label() + "\\" + rightcorner_node.label(), [])
+        new_right_node = Tree(rightcorner_node.label(), rightcorner_node.leaves())
 
-        new_left_node = NodePair(node.node_info, rightcorner_node_info, parent=node)
-        new_right_node = Node(rightcorner_node_info, node)
-
-        node.set_left(new_left_node)
-        node.set_right(new_right_node)
+        node.insert(0, new_left_node)
+        node.insert(1, new_right_node)
+        return ref_node, rightcorner_node, rightcorner_node, rightcorner_node
 
     @classmethod
-    def expand_nt_nt(cls, node: NodePair) -> None:
-        parent_node = node.node_info2.ref.parent
-        new_left_node = NodePair(node.node_info1, parent_node.node_info.copy(parent_node),
-                                 parent=node)
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
+        parent_node = ref_node2.parent()
+        if ref_node1 == parent_node:
+            new_left_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), ["EPS"])
+        else:
+            new_left_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), [])
 
-        sibling_node = node.node_info2.ref.get_sibling()
-        new_right_node = Node(sibling_node.node_info.copy(sibling_node), parent=node)
+        sibling_node = ref_node2.left_sibling()
+        if len(sibling_node) == 1:
+            new_right_node = Tree(sibling_node.label(), sibling_node.leaves())
+        else:
+            new_right_node = Tree(sibling_node.label(), [])
 
-        node.set_left(new_left_node)
-        node.set_right(new_right_node)
+        node.insert(0, new_left_node)
+        node.insert(1, new_right_node)
+        return ref_node1, parent_node, sibling_node, sibling_node

@@ -38,6 +38,7 @@ class Node:
 
         # Since it should be an attribute of the node for printing the tree
         self.label = self.get_label()
+        self.depth = 0
 
     def set_left(self, left: 'Node') -> None:
         self.left = left
@@ -89,7 +90,15 @@ class Node:
         return Node.is_topo_eq(node1.left, node2.left) and Node.is_topo_eq(node1.right, node2.right)
 
     def __str__(self) -> str:
-        return self.label
+        if self.node_info.type == NodeType.PT:
+            return "\t"*self.depth + "(" + self.label + ")"
+        else:
+            if self.left.node_info.type == NodeType.PT and self.right.node_info.type == NodeType.PT:
+                return "\t"*self.depth + "(" + self.label + " " + str(self.left) + " " + str(self.right) + ")"
+            else:
+                self.left.depth = self.depth + 1
+                self.right.depth = self.depth + 1
+                return "\t"*self.depth + "(" + self.label + "\n" + str(self.left) + "\n" + str(self.right) + ")"
 
     def __repr__(self) -> str:
         return self.label

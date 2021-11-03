@@ -1,6 +1,7 @@
 import unittest
 
 import numpy as np
+from nltk import Tree, ParentedTree
 
 from node import Node, NodeInfo, NodeType
 from rev_transform import rev_rc_transform, rev_lc_transform
@@ -193,9 +194,29 @@ class TetrataggerTest(unittest.TestCase):
             self.assertTrue(2*n == len(tags_bu))
             self.assertTrue((2*n-1) == len(tags_td))
 
+class TestNLTKTree(unittest.TestCase):
+    def test_string_format(self):
+        root = Node(NodeInfo(NodeType.NT, "ROOT"), None)
+        input_str = []
+        random_tree(root, input_str, depth=0, cutoff=5)
+        print_tree(root)
+        print(str(root))
+        t = Tree.fromstring(str(root))
+        t.pretty_print()
+
+    def test_nltk_lc(self):
+        tree = ParentedTree.fromstring("(S (NP (det the) (N dog)) (VP (V ran) (Adv fast)))")
+        tree.pretty_print()
+        new_tree_lc = ParentedTree("S", [])
+        LeftCornerTransformer.transform(new_tree_lc, tree, tree)
+        new_tree_lc.pretty_print()
+
+        new_tree_rc = ParentedTree("S", [])
+        RightCornerTransformer.transform(new_tree_rc, tree, tree)
+        new_tree_rc.pretty_print()
+
+
 
 if __name__ == '__main__':
     unittest.main()
 
-# TODO: add a pruning method for nodes of the form X-X and its inverse, which I think is possible. Also remove unnecessary unaries
-# TODO: make sure that the leaf nodes stay after the transform

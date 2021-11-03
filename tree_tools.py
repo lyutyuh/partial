@@ -17,7 +17,7 @@ def random_tree(node: Node, input_str: [str], depth=0, p=.75, cutoff=7) -> None:
         node.set_left(left)
         random_tree(left, input_str, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        label = random.choice(string.ascii_letters)
+        label = "X/" + str(depth) + " " + random.choice(string.ascii_letters)
         input_str.append(label)
         left = Node(NodeInfo(NodeType.PT, label), node)
         node.set_left(left)
@@ -29,7 +29,7 @@ def random_tree(node: Node, input_str: [str], depth=0, p=.75, cutoff=7) -> None:
         node.set_right(right)
         random_tree(right, input_str, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        label = random.choice(string.ascii_letters)
+        label = "X/" + str(depth) + " " + random.choice(string.ascii_letters)
         input_str.append(label)
         right = Node(NodeInfo(NodeType.PT, label), node)
         node.set_right(right)
