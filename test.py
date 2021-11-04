@@ -14,7 +14,7 @@ np.random.seed(0)
 
 
 class TestTransforms(unittest.TestCase):
-    def test_nltk_transform(self):
+    def test_transform(self):
         tree = ParentedTree.fromstring("(S (NP (det the) (N dog)) (VP (V ran) (Adv fast)))")
         tree.pretty_print()
         new_tree_lc = ParentedTree("S", [])
@@ -25,7 +25,7 @@ class TestTransforms(unittest.TestCase):
         RightCornerTransformer.transform(new_tree_rc, tree, tree)
         new_tree_rc.pretty_print()
 
-    def test_nltk_rev_rc_transform(self, trials=100):
+    def test_rev_rc_transform(self, trials=100):
         for _ in range(trials):
             t = ParentedTree("ROOT", [])
             random_tree(t, depth=0, cutoff=5)
@@ -35,7 +35,7 @@ class TestTransforms(unittest.TestCase):
             tree_back = RightCornerTransformer.rev_transform(tree_back, new_tree_rc)
             self.assertEqual(tree_back, t)
 
-    def test_nltk_rev_lc_transform(self, trials=100):
+    def test_rev_lc_transform(self, trials=100):
         for _ in range(trials):
             t = ParentedTree("ROOT", [])
             random_tree(t, depth=0, cutoff=5)
