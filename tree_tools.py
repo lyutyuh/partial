@@ -1,98 +1,54 @@
 import random
 import string
+from enum import Enum
 
 import numpy as np
+from nltk import ParentedTree as Tree
 
-from node import Node, NodeType, NodeInfo
+
+class NodeType(Enum):
+    NT = 0
+    NT_NT = 1
+    PT = 2
 
 
-def random_tree(node: Node, input_str: [str], depth=0, p=.75, cutoff=7) -> None:
+def find_node_type(node: Tree) -> NodeType:
+    if len(node) == 1:
+        return NodeType.PT
+    elif node.label().find("\\") != -1:
+        return NodeType.NT_NT
+    else:
+        return NodeType.NT
+
+
+def is_node_epsilon(node: Tree) -> bool:
+    if len(node.leaves()) == 1 and node.leaves()[0] == "EPS":
+        return True
+    return False
+
+
+def random_tree(node: Tree, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree
     @param input_str: list of sampled terminals
     """
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the left child tree
         left_label = "X/" + str(depth)
-        left = Node(NodeInfo(NodeType.NT, left_label), node)
-        node.set_left(left)
-        random_tree(left, input_str, depth=depth + 1, p=p, cutoff=cutoff)
+        left = Tree(left_label, [])
+        node.insert(0, left)
+        random_tree(left, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        label = "X/" + str(depth) + " " + random.choice(string.ascii_letters)
-        input_str.append(label)
-        left = Node(NodeInfo(NodeType.PT, label), node)
-        node.set_left(left)
+        label = "X/" + str(depth)
+        left = Tree(label, [random.choice(string.ascii_letters)])
+        node.insert(0, left)
 
     if np.random.binomial(1, p) == 1 and depth < cutoff:
         # add the right child tree
         right_label = "X/" + str(depth)
-        right = Node(NodeInfo(NodeType.NT, right_label), node)
-        node.set_right(right)
-        random_tree(right, input_str, depth=depth + 1, p=p, cutoff=cutoff)
+        right = Tree(right_label, [])
+        node.insert(1, right)
+        random_tree(right, depth=depth + 1, p=p, cutoff=cutoff)
     else:
-        label = "X/" + str(depth) + " " + random.choice(string.ascii_letters)
-        input_str.append(label)
-        right = Node(NodeInfo(NodeType.PT, label), node)
-        node.set_right(right)
-
-
-def example_tree_with_labels() -> Node:
-    root = Node(NodeInfo(NodeType.NT, "S"), None)
-    np = Node(NodeInfo(NodeType.NT, "NP"), root)
-    vp = Node(NodeInfo(NodeType.NT, "VP"), root)
-    root.set_left(np)
-    root.set_right(vp)
-
-    det = Node(NodeInfo(NodeType.PT, "Det(the)"), np)
-    n = Node(NodeInfo(NodeType.PT, "N(dog)"), np)
-    np.set_left(det)
-    np.set_right(n)
-
-    v = Node(NodeInfo(NodeType.PT, "V(ran)"), vp)
-    adv = Node(NodeInfo(NodeType.PT, "Adv(fast)"), vp)
-    vp.set_left(v)
-    vp.set_right(adv)
-
-    return root
-
-
-def example_tree_without_labels() -> Node:
-    root = Node(NodeInfo(NodeType.NT, "Z_c"), None)
-    Y_b = Node(NodeInfo(NodeType.NT, "Y_b"), root)
-    Y_c = Node(NodeInfo(NodeType.NT, "Y_c"), root)
-    root.set_left(Y_c)
-    root.set_right(Y_b)
-
-    X_a = Node(NodeInfo(NodeType.PT, "X_a"), Y_b)
-    X_b = Node(NodeInfo(NodeType.PT, "X_b"), Y_b)
-    Y_b.set_left(X_b)
-    Y_b.set_right(X_a)
-
-    X_c = Node(NodeInfo(NodeType.PT, "X_c"), Y_c)
-    X_d = Node(NodeInfo(NodeType.PT, "X_d"), Y_c)
-    Y_c.set_left(X_d)
-    Y_c.set_right(X_c)
-    return root
-
-
-def tetratagger_example() -> Node:
-    root = Node(NodeInfo(NodeType.NT, "S"), None)
-    one = Node(NodeInfo(NodeType.NT, "1"), root)
-    E = Node(NodeInfo(NodeType.PT, "E"), root)
-    root.set_left(one)
-    root.set_right(E)
-
-    A = Node(NodeInfo(NodeType.PT, "A"), one)
-    two = Node(NodeInfo(NodeType.NT, "2"), one)
-    one.set_left(A)
-    one.set_right(two)
-
-    B = Node(NodeInfo(NodeType.PT, "B"), two)
-    three = Node(NodeInfo(NodeType.NT, "3"), two)
-    two.set_left(B)
-    two.set_right(three)
-
-    C = Node(NodeInfo(NodeType.PT, "C"), three)
-    D = Node(NodeInfo(NodeType.PT, "D"), three)
-    three.set_left(C)
-    three.set_right(D)
-    return root
+        label = "X/" + str(depth)
+        right = Tree(label, [random.choice(string.ascii_letters)])
+        node.insert(1, right)

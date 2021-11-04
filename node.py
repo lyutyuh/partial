@@ -1,12 +1,4 @@
-from enum import Enum
-
-
-class NodeType(Enum):
-    NT = 0
-    NT_NT = 1
-    PT = 2
-
-
+from tree_tools import NodeType
 class NodeInfo:
     def __init__(self, type: NodeType, label: str, ref=None):
         self.type: NodeType = type

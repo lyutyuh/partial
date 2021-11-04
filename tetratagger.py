@@ -4,19 +4,12 @@ from node import Node, NodeType, NodeInfo, NodePair
 from transform import LeftCornerTransformer
 import logging
 
-from visualize import print_tree
-
 
 class TetraType(Enum):
     r = 0
     l = 1
     R = 2
     L = 3
-
-
-class SRAction(Enum):
-    S = "SHIFT"
-    R = "REDUCE"
 
 
 class TetraTagger:

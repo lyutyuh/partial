@@ -1,14 +1,5 @@
-from node import Node, NodePair, NodeType
 from nltk import ParentedTree as Tree
-
-
-def find_type(node: Tree):
-    if len(node) == 1:
-        return NodeType.PT
-    elif node.label().find("\\") != -1:
-        return NodeType.NT_NT
-    else:
-        return NodeType.NT
+from tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class Transformer:
@@ -17,7 +8,8 @@ class Transformer:
         raise NotImplementedError("expand non-terminal is not implemented")
 
     @classmethod
-    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (
+            Tree, Tree, Tree, Tree):
         raise NotImplementedError("expand paired non-terimnal is not implemented")
 
     @classmethod
@@ -36,11 +28,12 @@ class Transformer:
     def transform(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> None:
         if node is None:
             return
-        type = find_type(node)
+        type = find_node_type(node)
         if type == NodeType.NT:
             left_ref1, left_ref2, right_ref1, right_ref2 = cls.expand_nt(node, ref_node1)
         elif type == NodeType.NT_NT:
-            left_ref1, left_ref2, right_ref1, right_ref2 = cls.expand_nt_nt(node, ref_node1, ref_node2)
+            left_ref1, left_ref2, right_ref1, right_ref2 = cls.expand_nt_nt(node, ref_node1,
+                                                                            ref_node2)
         else:
             return
         cls.transform(node[0], left_ref1, left_ref2)
@@ -52,7 +45,7 @@ class LeftCornerTransformer(Transformer):
     @classmethod
     def extract_left_corner_no_eps(cls, node: Tree) -> Tree:
         while len(node) > 1:
-            if not node.left.is_eps():
+            if not is_node_epsilon(node[0]):
                 node = node[0]
             else:
                 node = node[1]
@@ -69,12 +62,15 @@ class LeftCornerTransformer(Transformer):
         return leftcorner_node, leftcorner_node, ref_node, leftcorner_node
 
     @classmethod
-    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (
+            Tree, Tree, Tree, Tree):
         parent_node = ref_node2.parent()
         if ref_node1 == parent_node:
-            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), ["EPS"])
+            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(),
+                                  ["EPS"])
         else:
-            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), [])
+            new_right_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(),
+                                  [])
 
         sibling_node = ref_node2.right_sibling()
         if len(sibling_node) == 1:
@@ -85,6 +81,41 @@ class LeftCornerTransformer(Transformer):
         node.insert(0, new_left_node)
         node.insert(1, new_right_node)
         return sibling_node, sibling_node, ref_node1, parent_node
+
+    @classmethod
+    def rev_transform(cls, node: Tree, ref_node: Tree, pick_up_labels=True) -> Tree:
+        if find_node_type(ref_node) == NodeType.NT_NT and pick_up_labels:
+            node.set_label(ref_node[1].label().split("\\")[1])
+        if find_node_type(ref_node[0]) == NodeType.PT and not is_node_epsilon(ref_node[1]):
+            # X -> word X
+            pt_node = Tree(ref_node[0].label(), ref_node[0].leaves())
+            if node[0] == "":
+                node[0] = pt_node
+            else:
+                node[1] = pt_node
+                par_node = Tree("X", [node, ""])
+                node = par_node
+            return cls.rev_transform(node, ref_node[1], pick_up_labels)
+        elif find_node_type(ref_node[0]) != NodeType.PT and is_node_epsilon(ref_node[1]):
+            # X -> X X-X
+            if node[0] == "":
+                raise ValueError(
+                    "When reaching the root the left branch should already exist")
+            node[1] = cls.rev_transform(Tree("X", ["", ""]), ref_node[0], pick_up_labels)
+            return node
+        elif find_node_type(ref_node[0]) == NodeType.PT and is_node_epsilon(ref_node[1]):
+            # X -> word X-X
+            if node[0] == "":
+                raise ValueError(
+                    "When reaching the end of the chain the left branch should already exist")
+            node[1] = Tree(ref_node[0].label(), ref_node[0].leaves())
+            return node
+        elif find_node_type(ref_node[0]) != NodeType.PT and find_node_type(
+                ref_node[1]) != NodeType.PT:
+            # X -> X X
+            node[1] = cls.rev_transform(Tree("X", ["", ""]), ref_node[0], pick_up_labels)
+            par_node = Tree("X", [node, ""])
+            return cls.rev_transform(par_node, ref_node[1], pick_up_labels)
 
 
 class RightCornerTransformer(Transformer):
@@ -100,10 +131,12 @@ class RightCornerTransformer(Transformer):
         return ref_node, rightcorner_node, rightcorner_node, rightcorner_node
 
     @classmethod
-    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (Tree, Tree, Tree, Tree):
+    def expand_nt_nt(cls, node: Tree, ref_node1: Tree, ref_node2: Tree) -> (
+            Tree, Tree, Tree, Tree):
         parent_node = ref_node2.parent()
         if ref_node1 == parent_node:
-            new_left_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), ["EPS"])
+            new_left_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(),
+                                 ["EPS"])
         else:
             new_left_node = Tree(node.label().split("\\")[0] + "\\" + parent_node.label(), [])
 
@@ -116,3 +149,38 @@ class RightCornerTransformer(Transformer):
         node.insert(0, new_left_node)
         node.insert(1, new_right_node)
         return ref_node1, parent_node, sibling_node, sibling_node
+
+    @classmethod
+    def rev_transform(cls, node: Tree, ref_node: Tree, pick_up_labels=True) -> Tree:
+        if find_node_type(ref_node) == NodeType.NT_NT and pick_up_labels:
+            node.set_label(ref_node[0].label().split("\\")[1])
+        if find_node_type(ref_node[1]) == NodeType.PT and not is_node_epsilon(ref_node[0]):
+            # X -> X word
+            pt_node = Tree(ref_node[1].label(), ref_node[1].leaves())
+            if node[1] == "":
+                node[1] = pt_node
+            else:
+                node[0] = pt_node
+                par_node = Tree("X", ["", node])
+                node = par_node
+            return cls.rev_transform(node, ref_node[0], pick_up_labels)
+        elif find_node_type(ref_node[1]) != NodeType.PT and is_node_epsilon(ref_node[0]):
+            # X -> X-X X
+            if node[1] == "":
+                raise ValueError(
+                    "When reaching the root the right branch should already exist")
+            node[0] = cls.rev_transform(Tree("X", ["", ""]), ref_node[1], pick_up_labels)
+            return node
+        elif find_node_type(ref_node[1]) == NodeType.PT and is_node_epsilon(ref_node[0]):
+            # X -> X-X word
+            if node[1] == "":
+                raise ValueError(
+                    "When reaching the end of the chain the right branch should already exist")
+            node[0] = Tree(ref_node[1].label(), ref_node[1].leaves())
+            return node
+        elif find_node_type(ref_node[1]) != NodeType.PT and find_node_type(
+                ref_node[0]) != NodeType.PT:
+            # X -> X X
+            node[0] = cls.rev_transform(Tree("X", ["", ""]), ref_node[1], pick_up_labels)
+            par_node = Tree("X", ["", node])
+            return cls.rev_transform(par_node, ref_node[0], pick_up_labels)
