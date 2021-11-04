@@ -27,6 +27,16 @@ def is_node_epsilon(node: Tree) -> bool:
     return False
 
 
+def is_topo_equal(first: Tree, second: Tree) -> bool:
+    if len(first) == 1 and len(second) != 1:
+        return False
+    if len(first) != 1 and len(second) == str:
+        return False
+    if len(first) == 1 and len(second) == 1:
+        return True
+    return is_topo_equal(first[0], second[0]) and is_topo_equal(first[1], second[1])
+
+
 def random_tree(node: Tree, depth=0, p=.75, cutoff=7) -> None:
     """ sample a random tree
     @param input_str: list of sampled terminals

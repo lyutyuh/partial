@@ -1,197 +1,16 @@
+import logging
 import unittest
 
 import numpy as np
-from nltk import Tree, ParentedTree
+from nltk import ParentedTree
 
-from node import Node, NodeInfo, NodeType
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
 from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import random_tree
-from visualize import print_tree
+from tree_tools import random_tree, is_topo_equal
+
+# logging.getLogger().setLevel(logging.DEBUG)
 
 np.random.seed(0)
-
-
-# class TestLeftCornerTransform(unittest.TestCase):
-#     def test_labeled_complete_binary(self):
-#         print("Please check the left corner transform")
-#         root = example_tree_with_labels()
-#         print_tree(root)
-#
-#         new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-#         LeftCornerTransformer.transform(new_root)
-#         print_tree(new_root)
-#         print("=" * 20)
-#         self.assertTrue(True)
-#
-#
-# class TestRightCornerTransform(unittest.TestCase):
-#     def test_labeled_complete_binary(self):
-#         print("Please check the right corner transform")
-#         root = example_tree_with_labels()
-#         print_tree(root)
-#
-#         new_root = Node(NodeInfo(NodeType.NT, "S", ref=root), None)
-#         RightCornerTransformer.transform(new_root)
-#         print_tree(new_root)
-#         print("=" * 20)
-#         self.assertTrue(True)
-
-
-class TetrataggerTest(unittest.TestCase):
-
-    # def test_bottom_up_johnson(self):
-    #     root = example_tree_with_labels()
-    #     print_tree(root)
-    #     print("--" * 20)
-    #     rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-    #     RightCornerTransformer.transform(rc_root)
-    #     print_tree(rc_root)
-    #     print("--" * 20)
-    #
-    #     tagger = BottomUpTetratagger()
-    #     tags = tagger.tree_to_tags(rc_root)
-    #
-    #     for tag in tagger.tetra_visualize(tags):
-    #         print(tag)
-    #     print("--" * 20)
-    #
-    #     root_from_tags = tagger.tags_to_tree(tags,
-    #                                          ["Det(the)", "N(dog)", "V(ran)", "Adv(fast)"])
-    #     print_tree(root_from_tags)
-    #     print("--" * 20)
-    #     original_tree_root_back = Node(NodeInfo(NodeType.NT, "X"))
-    #     original_tree_root_back = rev_rc_transform(original_tree_root_back, root_from_tags)
-    #     print_tree(original_tree_root_back)
-    #     print("=" * 20)
-    #     self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
-    #     self.assertFalse(Node.is_topo_eq(root, rc_root))
-
-    # def test_bottom_up_kitaev(self):
-    #     print("Checking the bottom-up tetratagger on Kitaev and Klein (2020)'s Figure 1")
-    #     root = tetratagger_example()
-    #     print_tree(root)
-    #     print("--" * 20)
-    #     rc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-    #     RightCornerTransformer.transform(rc_root)
-    #     print_tree(rc_root)
-    #     print("--" * 20)
-    #
-    #     tagger = BottomUpTetratagger()
-    #     tags = tagger.tree_to_tags(rc_root)
-    #
-    #     for tag in tagger.tetra_visualize(tags):
-    #         print(tag)
-    #     print("--" * 20)
-    #
-    #     root_from_tags = tagger.tags_to_tree(tags, ["A", "B", "C", "D", "E"])
-    #     print_tree(root_from_tags)
-    #     print("--" * 20)
-    #     original_tree_root_back = Node(NodeInfo(NodeType.NT, "X"))
-    #     rev_rc_transform(original_tree_root_back, root_from_tags)
-    #     print_tree(original_tree_root_back)
-    #     print("=" * 20)
-    #     self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
-    #     self.assertFalse(Node.is_topo_eq(root, rc_root))
-
-    # def test_top_down_kitaev(self):
-    #     print("Checking the top-down tetratagger on Kitaev and Klein (2020)'s Figure 1")
-    #     root = tetratagger_example()
-    #     print_tree(root)
-    #     print("--" * 20)
-    #     lc_root = Node(NodeInfo(NodeType.NT, root.label, ref=root), None)
-    #     LeftCornerTransformer.transform(lc_root)
-    #     print_tree(lc_root)
-    #     print("--" * 20)
-    #
-    #     tagger = TopDownTetratagger()
-    #     tags = tagger.tree_to_tags(lc_root)
-    #
-    #     for tag in tagger.tetra_visualize(tags):
-    #         print(tag)
-    #     print("--" * 20)
-    #
-    #     root_from_tags = tagger.tags_to_tree(tags, ["A", "B", "C", "D", "E"])
-    #     print_tree(root_from_tags)
-    #     print("--" * 20)
-    #     original_tree_root_back = Node(NodeInfo(NodeType.NT, "X"))
-    #     original_tree_root_back = rev_lc_transform(original_tree_root_back, root_from_tags)
-    #     print_tree(original_tree_root_back)
-    #     print("=" * 20)
-    #     self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
-    #     self.assertFalse(Node.is_topo_eq(root, lc_root))
-
-    def test_bottom_up_round_trip(self, trials=1000):
-        print("Checking the bottom-up tetratagger on {0} random trees".format(trials))
-
-        for trial in range(trials):
-            root = Node(NodeInfo(NodeType.NT, "ROOT"), None)
-            input_str = []
-            random_tree(root, input_str, depth=0, cutoff=2)
-            # print_tree(root)
-
-            rc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
-            RightCornerTransformer.transform(rc_root)
-            # print_tree(rc_root)
-
-            tagger = BottomUpTetratagger()
-            tags = tagger.tree_to_tags(rc_root)
-            root_from_tags = tagger.tags_to_tree(tags, input_str)
-            # print_tree(root_from_tags)
-
-            original_tree_root_back = Node(NodeInfo(NodeType.NT, "X"))
-            original_tree_root_back = RightCornerTransformer.rev_transform(original_tree_root_back,
-                                                       root_from_tags)
-            # print_tree(original_tree_root_back)
-
-            self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
-
-    def test_top_down_round_trip(self, trials=1000):
-        print("Checking the top-down tetratagger on {0} random trees".format(trials))
-
-        for trial in range(trials):
-            root = Node(NodeInfo(NodeType.NT, "ROOT"), None)
-            input_str = []
-            random_tree(root, input_str, depth=0, cutoff=2)
-            # print_tree(root)
-
-            lc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
-            LeftCornerTransformer.transform(lc_root)
-            # print_tree(rc_root)
-
-            tagger = TopDownTetratagger()
-            tags = tagger.tree_to_tags(lc_root)
-            root_from_tags = tagger.tags_to_tree(tags, input_str)
-            # print_tree(root_from_tags)
-
-            original_tree_root_back = Node(NodeInfo(NodeType.NT, "X"))
-            original_tree_root_back = LeftCornerTransformer.rev_transform(original_tree_root_back,
-                                                       root_from_tags)
-            # print_tree(original_tree_root_back)
-
-            self.assertTrue(Node.is_topo_eq(root, original_tree_root_back))
-
-    def test_alternation_and_length(self, trials=100):
-        for trial in range(trials):
-            root = Node(NodeInfo(NodeType.NT, "ROOT"), None)
-            input_str = []
-            random_tree(root, input_str, depth=0, cutoff=2)
-            n = len(input_str)
-
-            rc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
-            lc_root = Node(NodeInfo(NodeType.NT, "ROOT", ref=root), None)
-            RightCornerTransformer.transform(rc_root)
-            LeftCornerTransformer.transform(lc_root)
-
-            tagger_bu = BottomUpTetratagger()
-            tagger_td = TopDownTetratagger()
-            tags_bu = tagger_bu.tree_to_tags(rc_root)
-            tags_td = tagger_td.tree_to_tags(lc_root)
-
-            self.assertTrue(tagger_bu.is_alternating(tags_bu))
-            self.assertTrue(tagger_td.is_alternating(tags_td))
-            self.assertTrue(2 * n == len(tags_bu))
-            self.assertTrue((2 * n - 1) == len(tags_td))
 
 
 class TestTransforms(unittest.TestCase):
@@ -207,10 +26,9 @@ class TestTransforms(unittest.TestCase):
         new_tree_rc.pretty_print()
 
     def test_nltk_rev_rc_transform(self, trials=100):
-        for trial in range(trials):
-            root = ParentedTree("ROOT", [])
-            random_tree(root, depth=0, cutoff=5)
-            t = ParentedTree.fromstring(str(root))
+        for _ in range(trials):
+            t = ParentedTree("ROOT", [])
+            random_tree(t, depth=0, cutoff=5)
             new_tree_rc = ParentedTree("S", [])
             RightCornerTransformer.transform(new_tree_rc, t, t)
             tree_back = ParentedTree("X", ["", ""])
@@ -218,16 +36,92 @@ class TestTransforms(unittest.TestCase):
             self.assertEqual(tree_back, t)
 
     def test_nltk_rev_lc_transform(self, trials=100):
-        for trial in range(trials):
-            root = ParentedTree("ROOT", [])
-            random_tree(root, depth=0, cutoff=5)
-            t = ParentedTree.fromstring(str(root))
+        for _ in range(trials):
+            t = ParentedTree("ROOT", [])
+            random_tree(t, depth=0, cutoff=5)
             new_tree_lc = ParentedTree("S", [])
             LeftCornerTransformer.transform(new_tree_lc, t, t)
             tree_back = ParentedTree("X", ["", ""])
             tree_back = LeftCornerTransformer.rev_transform(tree_back, new_tree_lc)
             self.assertEqual(tree_back, t)
 
+
+class TestTagging(unittest.TestCase):
+    def test_buttom_up(self):
+        tree = ParentedTree.fromstring("(S (NP (det the) (N dog)) (VP (V ran) (Adv fast)))")
+        tree.pretty_print()
+        tree_rc = ParentedTree("S", [])
+        RightCornerTransformer.transform(tree_rc, tree, tree)
+        tree_rc.pretty_print()
+        tagger = BottomUpTetratagger()
+        tags = tagger.tree_to_tags(tree_rc)
+
+        for tag in tagger.tetra_visualize(tags):
+            print(tag)
+        print("--" * 20)
+
+    def test_buttom_up_alternate(self, trials=100):
+        for _ in range(trials):
+            t = ParentedTree("ROOT", [])
+            random_tree(t, depth=0, cutoff=5)
+            t_rc = ParentedTree("S", [])
+            RightCornerTransformer.transform(t_rc, t, t)
+            tagger = BottomUpTetratagger()
+            tags = tagger.tree_to_tags(t_rc)
+            self.assertTrue(tagger.is_alternating(tags))
+            self.assertTrue(2 * len(t.leaves()) == len(tags))
+
+    def round_trip_test_buttom_up(self, trials=100):
+        for _ in range(trials):
+            tree = ParentedTree("ROOT", [])
+            random_tree(tree, depth=0, cutoff=5)
+            tree_rc = ParentedTree("S", [])
+            RightCornerTransformer.transform(tree_rc, tree, tree)
+            tagger = BottomUpTetratagger()
+            tags = tagger.tree_to_tags(tree_rc)
+            root_from_tags = tagger.tags_to_tree(tags, tree.leaves())
+            tree_back = ParentedTree("X", ["", ""])
+            tree_back = RightCornerTransformer.rev_transform(tree_back, root_from_tags,
+                                                             pick_up_labels=False)
+            self.assertTrue(is_topo_equal(tree, tree_back))
+
+    def test_top_down(self):
+        tree = ParentedTree.fromstring("(S (NP (det the) (N dog)) (VP (V ran) (Adv fast)))")
+        tree.pretty_print()
+        tree_lc = ParentedTree("S", [])
+        LeftCornerTransformer.transform(tree_lc, tree, tree)
+        tree_lc.pretty_print()
+        tagger = TopDownTetratagger()
+        tags = tagger.tree_to_tags(tree_lc)
+
+        for tag in tagger.tetra_visualize(tags):
+            print(tag)
+        print("--" * 20)
+
+    def test_top_down_alternate(self, trials=100):
+        for _ in range(trials):
+            t = ParentedTree("ROOT", [])
+            random_tree(t, depth=0, cutoff=5)
+            t_lc = ParentedTree("S", [])
+            LeftCornerTransformer.transform(t_lc, t, t)
+            tagger = TopDownTetratagger()
+            tags = tagger.tree_to_tags(t_lc)
+            self.assertTrue(tagger.is_alternating(tags))
+            self.assertTrue((2 * len(t.leaves()) - 1) == len(tags))
+
+    def round_trip_test_top_down(self, trials=100):
+        for _ in range(trials):
+            tree = ParentedTree("ROOT", [])
+            random_tree(tree, depth=0, cutoff=5)
+            tree_lc = ParentedTree("S", [])
+            LeftCornerTransformer.transform(tree_lc, tree, tree)
+            tagger = TopDownTetratagger()
+            tags = tagger.tree_to_tags(tree_lc)
+            root_from_tags = tagger.tags_to_tree(tags, tree.leaves())
+            tree_back = ParentedTree("X", ["", ""])
+            tree_back = LeftCornerTransformer.rev_transform(tree_back, root_from_tags,
+                                                            pick_up_labels=False)
+            self.assertTrue(is_topo_equal(tree, tree_back))
 
 
 if __name__ == '__main__':

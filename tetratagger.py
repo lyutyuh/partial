@@ -1,8 +1,10 @@
+import logging
 from enum import Enum
 
-from node import Node, NodeType, NodeInfo, NodePair
+from nltk import ParentedTree as Tree
+
 from transform import LeftCornerTransformer
-import logging
+from tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class TetraType(Enum):
@@ -15,11 +17,11 @@ class TetraType(Enum):
 class TetraTagger:
 
     @classmethod
-    def tree_to_tags(cls, root: Node) -> [TetraType]:
+    def tree_to_tags(cls, root: Tree) -> [TetraType]:
         raise NotImplementedError("tree to tags is not implemented")
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
         raise NotImplementedError("tags to tree is not implemented")
 
     @classmethod
@@ -67,16 +69,17 @@ class BottomUpTetratagger(TetraTagger):
         return new_tags
 
     @classmethod
-    def tree_to_tags(cls, root: Node) -> []:
+    def tree_to_tags(cls, root: Tree) -> []:
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
-        logging.debug("SHIFT {}".format(lc))
+        logging.debug("SHIFT {}".format(lc.label()))
         tags.append(TetraType.r)
         stack = [lc]
 
-        while len(stack) != 1 or stack[0].label != root.label:
+        while len(stack) != 1 or stack[0].label() != root.label():
             node = stack[-1]
-            if node.node_info.type == NodeType.NT:  # special case: merge the reduce and last shift
+            if find_node_type(
+                    node) == NodeType.NT:  # special case: merge the reduce and last shift
                 last_tag = tags.pop()
                 last_two_tag = tags.pop()
                 if last_tag != TetraType.R or last_two_tag != TetraType.r:
@@ -84,28 +87,31 @@ class BottomUpTetratagger(TetraTagger):
                         "When reaching NT the right PT should already be shifted")
                 tags.append(TetraType.l)  # merged shift
 
-            if not node.is_right_child() and node.parent.right is not None:
-                lc = LeftCornerTransformer.extract_left_corner_no_eps(node.parent.right)
+            if node.left_sibling() is None and node.right_sibling() is not None:
+                # if not node.is_right_child() and node.parent.right is not None:
+                lc = LeftCornerTransformer.extract_left_corner_no_eps(node.right_sibling())
                 stack.append(lc)
-                logging.debug("--> \t SHIFT {}".format(lc))
+                logging.debug("--> \t SHIFT {}".format(lc.label()))
                 tags.append(TetraType.r)  # normal shift
 
-            elif len(stack) >= 2 and node.get_sibling() == stack[-2]:
+            elif len(stack) >= 2 and (
+                    node.right_sibling() == stack[-2] or node.left_sibling() == stack[-2]):
                 prev_node = stack[-2]
                 logging.debug("==> \t REDUCE[ {0} {1} --> {2} ]".format(
-                    *(prev_node.label, node.label, node.parent.label)))
+                    *(prev_node.label(), node.label(), node.parent().label())))
 
                 tags.append(TetraType.R)  # normal reduce
                 stack.pop()
                 stack.pop()
-                stack.append(node.parent)
+                stack.append(node.parent())
 
-            elif node.node_info.type != NodeType.NT_NT:
+            elif find_node_type(node) != NodeType.NT_NT:
                 logging.debug(
-                    "<== \t REDUCE[ {0} --> {1} ]".format(*(node.label, node.parent.label)))
+                    "<== \t REDUCE[ {0} --> {1} ]".format(
+                        *(node.label(), node.parent().label())))
                 tags.append(TetraType.L)  # unary reduce
                 stack.pop()
-                stack.append(node.parent)
+                stack.append(node.parent())
             else:
                 logging.error("ERROR: Undefined stack state")
                 return
@@ -114,29 +120,27 @@ class BottomUpTetratagger(TetraTagger):
 
     @classmethod
     def _unary_reduce(cls, node, last_node):
-        info = NodeInfo(NodeType.NT, "X")
-        l_child = NodePair(info, info, node)
-        node.set_left(l_child)
-        node.set_right(last_node)
+        node.insert(0, Tree("X\\X", ["EPS"]))
+        node.insert(1, last_node)
         return node
 
     @classmethod
     def _reduce(cls, node, last_node, last_2_node):
-        node.set_right(last_node)
-        node.set_left(last_2_node)
+        node.insert(0, last_2_node)
+        node.insert(1, last_node)
         return node
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
         created_node_stack = []
         node = None
         expanded_tags = cls.expand_tags(tags)
         for tag in expanded_tags:
             if tag == TetraType.r:  # shift
-                created_node_stack.append(Node(NodeInfo(NodeType.PT, input_seq[0]), None))
+                created_node_stack.append(Tree("X", [input_seq[0]]))
                 input_seq.pop(0)
             else:
-                node = Node(NodeInfo(NodeType.NT, "X"), None)
+                node = Tree("X", [])
                 if tag == TetraType.R:  # normal reduce
                     last_node = created_node_stack.pop()
                     last_2_node = created_node_stack.pop()
@@ -162,63 +166,61 @@ class TopDownTetratagger(TetraTagger):
         return new_tags
 
     @classmethod
-    def tree_to_tags(cls, root: Node) -> [TetraType]:
+    def tree_to_tags(cls, root: Tree) -> [TetraType]:
         """ convert left-corner transformed tree to shifts and reduces """
-        stack: [Node] = [root]
-        logging.debug("SHIFT {}".format(root.label))
+        stack: [Tree] = [root]
+        logging.debug("SHIFT {}".format(root.label()))
         tags = []
         while len(stack) > 0:
             node = stack[-1]
-            if node.node_info.type == NodeType.NT or node.node_info.type == NodeType.NT_NT:
+            if find_node_type(node) == NodeType.NT or find_node_type(node) == NodeType.NT_NT:
                 stack.pop()
                 logging.debug("REDUCE[ {0} --> {1} {2}]".format(
-                    *(node.label, node.left.label, node.right.label)))
-                if node.node_info.type == NodeType.NT:
-                    if node.left is None:
-                        raise ValueError("Left child of NT should not be none")
-                    if node.left.node_info.type != NodeType.PT:
+                    *(node.label(), node[0].label(), node[1].label())))
+                if find_node_type(node) == NodeType.NT:
+                    # if node.left is None:
+                    #     raise ValueError("Left child of NT should not be none")
+                    if find_node_type(node[0]) != NodeType.PT:
                         raise ValueError("Left child of NT should be a PT")
-                    stack.append(node.right)
+                    stack.append(node[1])
                     tags.append(TetraType.l)  # merged shift
                 else:
-                    if not node.right.is_eps():
-                        stack.append(node.right)
+                    if not is_node_epsilon(node[1]):
+                        stack.append(node[1])
                         tags.append(TetraType.R)  # normal reduce
                     else:
                         tags.append(TetraType.L)  # unary reduce
-                    stack.append(node.left)
+                    stack.append(node[0])
 
-            elif node.node_info.type == NodeType.PT:
+            elif find_node_type(node) == NodeType.PT:
                 tags.append(TetraType.r)  # normal shift
-                logging.debug("-->\tSHIFT[ {0} ]".format(node.label))
+                logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
                 stack.pop()
 
         return tags
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Node:
+    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
         expanded_tags = cls.expand_tags(tags)
-        root = Node(NodeInfo(NodeType.NT, "X"), None)
+        root = Tree("X", [])
         created_node_stack = [root]
         for tag in expanded_tags:
             if tag == TetraType.r:  # shift
                 node = created_node_stack.pop()
-                node.update_node_info(NodeType.PT, input_seq[0])
+                node.insert(0, input_seq[0])
                 input_seq.pop(0)
             elif tag == TetraType.R or tag == TetraType.L:
                 parent = created_node_stack.pop()
                 if tag == TetraType.R:  # normal reduce
-                    r_node = Node(NodeInfo(NodeType.NT, "X"), parent)
+                    r_node = Tree("X", [])
                     created_node_stack.append(r_node)
                 else:
-                    node_info = NodeInfo(NodeType.NT, "X")
-                    r_node = NodePair(node_info, node_info, parent)
+                    r_node = Tree("X\\X", ["EPS"])
 
-                l_node = Node(NodeInfo(NodeType.NT, "X"), parent)
+                l_node = Tree("X", [])
                 created_node_stack.append(l_node)
-                parent.set_left(l_node)
-                parent.set_right(r_node)
-
+                parent.insert(0, l_node)
+                parent.insert(1, r_node)
             else:
                 raise ValueError("Invalid tag type")
         if len(input_seq) != 0:
