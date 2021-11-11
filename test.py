@@ -3,10 +3,14 @@ import unittest
 
 import numpy as np
 from nltk import ParentedTree
+from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
 from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import random_tree, is_topo_equal
+from tree_tools import random_tree, is_topo_equal, rc_preprocess
+
+from original_tetratagger import TetraTagSequence
+from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 
 # logging.getLogger().setLevel(logging.DEBUG)
 
@@ -69,7 +73,7 @@ class TestTagging(unittest.TestCase):
             tagger = BottomUpTetratagger()
             tags = tagger.tree_to_tags(t_rc)
             self.assertTrue(tagger.is_alternating(tags))
-            self.assertTrue(2 * len(t.leaves()) == len(tags))
+            self.assertTrue((2 * len(t.leaves()) - 1) == len(tags))
 
     def round_trip_test_buttom_up(self, trials=100):
         for _ in range(trials):
@@ -122,6 +126,28 @@ class TestTagging(unittest.TestCase):
             tree_back = LeftCornerTransformer.rev_transform(tree_back, root_from_tags,
                                                             pick_up_labels=False)
             self.assertTrue(is_topo_equal(tree, tree_back))
+
+
+class TestPipeline(unittest.TestCase):
+    def test_example_colab(self):
+        example_tree = Tree.fromstring(
+            "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
+        example_tree_rc = rc_preprocess(example_tree)
+        tagger = BottomUpTetratagger()
+        tags = tagger.tree_to_tags(example_tree_rc)
+        print(tags)
+        for tag in tagger.tetra_visualize(tags):
+            print(tag)
+
+    def compare_to_original_tetratagger(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
+        trees = READER.parsed_sents('test')
+        tagger = BottomUpTetratagger()
+        for tree in trees:
+            print(TetraTagSequence.from_tree(tree))
+            rc_tree = rc_preprocess(tree)
+            print(tagger.tree_to_tags(rc_tree))
+            break
 
 
 if __name__ == '__main__':

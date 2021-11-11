@@ -7,44 +7,53 @@ from transform import LeftCornerTransformer
 from tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
-class TetraType(Enum):
-    r = 0
-    l = 1
-    R = 2
-    L = 3
+# class TetraType(Enum):
+#     r = "r"
+#     l = "l"
+#     R = "R"
+#     L = "L"
 
 
 class TetraTagger:
+    def __init__(self, trees: [Tree] = None):
+        if not trees:
+            self.vocab = {'l', 'r', 'L', 'R'}
+        else:
+            tag_vocab = set()
+            for tree in trees:
+                for tag in self.tree_to_tags(tree):
+                    tag_vocab.add(tag)
+            self.tag_vocab = sorted(tag_vocab)
 
     @classmethod
-    def tree_to_tags(cls, root: Tree) -> [TetraType]:
+    def tree_to_tags(cls, root: Tree) -> [str]:
         raise NotImplementedError("tree to tags is not implemented")
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
+    def tags_to_tree(cls, tags: [str], input_seq: [str]) -> Tree:
         raise NotImplementedError("tags to tree is not implemented")
 
     @classmethod
-    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+    def expand_tags(cls, tags: [str]) -> [str]:
         raise NotImplementedError("expand tags is not implemented")
 
     @classmethod
-    def tetra_visualize(cls, tags: [TetraType]):
+    def tetra_visualize(cls, tags: [str]):
         for tag in tags:
-            if tag == TetraType.r:
+            if tag.startswith('r'):
                 yield "-->"
-            if tag == TetraType.l:
+            if tag.startswith('l'):
                 yield "<--"
-            if tag == TetraType.R:
+            if tag.startswith('R'):
                 yield "==>"
-            if tag == TetraType.L:
+            if tag.startswith('L'):
                 yield "<=="
 
     @classmethod
-    def is_alternating(cls, tags: [TetraType]) -> bool:
+    def is_alternating(cls, tags: [str]) -> bool:
         prev_state = True  # true means reduce
         for tag in tags:
-            if tag == TetraType.r or tag == TetraType.l:
+            if tag.startswith('r') or tag.startswith('l'):
                 state = False
             else:
                 state = True
@@ -58,41 +67,55 @@ class BottomUpTetratagger(TetraTagger):
     """ Kitaev and Klein (2020)"""
 
     @classmethod
-    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+    def expand_tags(cls, tags: [str]) -> [str]:
         new_tags = []
         for tag in tags:
-            if tag == TetraType.l:
-                new_tags.append(TetraType.r)
-                new_tags.append(TetraType.R)
+            if tag.startswith('r'):
+                new_tags.append("l" + tag[1:])
+                new_tags.append("R")
             else:
                 new_tags.append(tag)
         return new_tags
 
     @classmethod
+    def generate_string_tag(cls, label):
+        pass
+
+    @classmethod
     def tree_to_tags(cls, root: Tree) -> []:
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
+        if lc.label().find("+") != 1:
+            tags.append("l/" + lc.label().split("+")[0])
+        else:
+            tags.append("l")
         logging.debug("SHIFT {}".format(lc.label()))
-        tags.append(TetraType.r)
         stack = [lc]
 
-        while len(stack) != 1 or stack[0].label() != root.label():
+        while len(stack) > 0:
             node = stack[-1]
             if find_node_type(
                     node) == NodeType.NT:  # special case: merge the reduce and last shift
                 last_tag = tags.pop()
                 last_two_tag = tags.pop()
-                if last_tag != TetraType.R or last_two_tag != TetraType.r:
+                if not last_tag.startswith('R') or not last_two_tag.startswith('l'):
                     raise ValueError(
                         "When reaching NT the right PT should already be shifted")
-                tags.append(TetraType.l)  # merged shift
+                # merged shift
+                if str(last_two_tag).find("/") != -1:
+                    tags.append("r" + "/" + last_two_tag.split("/")[1])
+                else:
+                    tags.append("r")
 
             if node.left_sibling() is None and node.right_sibling() is not None:
-                # if not node.is_right_child() and node.parent.right is not None:
                 lc = LeftCornerTransformer.extract_left_corner_no_eps(node.right_sibling())
                 stack.append(lc)
-                logging.debug("--> \t SHIFT {}".format(lc.label()))
-                tags.append(TetraType.r)  # normal shift
+                logging.debug("<-- \t SHIFT {}".format(lc.label()))
+                # normal shift
+                if lc.label().find("+") != -1:
+                    tags.append("l" + "/" + lc.label().split("+")[0])
+                else:
+                    tags.append("l")
 
             elif len(stack) >= 2 and (
                     node.right_sibling() == stack[-2] or node.left_sibling() == stack[-2]):
@@ -100,16 +123,22 @@ class BottomUpTetratagger(TetraTagger):
                 logging.debug("==> \t REDUCE[ {0} {1} --> {2} ]".format(
                     *(prev_node.label(), node.label(), node.parent().label())))
 
-                tags.append(TetraType.R)  # normal reduce
+                tags.append("R" + "/" + prev_node.label().split("\\")[1].replace("+",
+                                                                                 "/"))  # normal reduce
                 stack.pop()
                 stack.pop()
                 stack.append(node.parent())
 
             elif find_node_type(node) != NodeType.NT_NT:
+                if stack[0].label() == root.label() and len(stack) == 1:
+                    stack.pop()
+                    continue
                 logging.debug(
                     "<== \t REDUCE[ {0} --> {1} ]".format(
                         *(node.label(), node.parent().label())))
-                tags.append(TetraType.L)  # unary reduce
+                # unary reduce
+                tags.append(
+                    "L" + "/" + node.parent().label().split("\\")[0].replace("+", "/"))
                 stack.pop()
                 stack.append(node.parent())
             else:
@@ -131,21 +160,21 @@ class BottomUpTetratagger(TetraTagger):
         return node
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
+    def tags_to_tree(cls, tags: [str], input_seq: [str]) -> Tree:
         created_node_stack = []
         node = None
         expanded_tags = cls.expand_tags(tags)
         for tag in expanded_tags:
-            if tag == TetraType.r:  # shift
+            if tag.startswith('l'):  # shift
                 created_node_stack.append(Tree("X", [input_seq[0]]))
                 input_seq.pop(0)
             else:
                 node = Tree("X", [])
-                if tag == TetraType.R:  # normal reduce
+                if tag.startswith('R'):  # normal reduce
                     last_node = created_node_stack.pop()
                     last_2_node = created_node_stack.pop()
                     created_node_stack.append(cls._reduce(node, last_node, last_2_node))
-                elif tag == TetraType.L:  # unary reduce
+                elif tag.startswith('L'):  # unary reduce
                     created_node_stack.append(
                         cls._unary_reduce(node, created_node_stack.pop()))
         if len(input_seq) != 0:
@@ -155,18 +184,18 @@ class BottomUpTetratagger(TetraTagger):
 
 class TopDownTetratagger(TetraTagger):
     @classmethod
-    def expand_tags(cls, tags: [TetraType]) -> [TetraType]:
+    def expand_tags(cls, tags: [str]) -> [str]:
         new_tags = []
         for tag in tags:
-            if tag == TetraType.l:
-                new_tags.append(TetraType.R)
-                new_tags.append(TetraType.r)
+            if tag.startswith('l'):
+                new_tags.append("R")
+                new_tags.append("r" + tag[1:])
             else:
                 new_tags.append(tag)
         return new_tags
 
     @classmethod
-    def tree_to_tags(cls, root: Tree) -> [TetraType]:
+    def tree_to_tags(cls, root: Tree) -> [str]:
         """ convert left-corner transformed tree to shifts and reduces """
         stack: [Tree] = [root]
         logging.debug("SHIFT {}".format(root.label()))
@@ -183,35 +212,35 @@ class TopDownTetratagger(TetraTagger):
                     if find_node_type(node[0]) != NodeType.PT:
                         raise ValueError("Left child of NT should be a PT")
                     stack.append(node[1])
-                    tags.append(TetraType.l)  # merged shift
+                    tags.append("l")  # merged shift
                 else:
                     if not is_node_epsilon(node[1]):
                         stack.append(node[1])
-                        tags.append(TetraType.R)  # normal reduce
+                        tags.append("R")  # normal reduce
                     else:
-                        tags.append(TetraType.L)  # unary reduce
+                        tags.append("L")  # unary reduce
                     stack.append(node[0])
 
             elif find_node_type(node) == NodeType.PT:
-                tags.append(TetraType.r)  # normal shift
+                tags.append("r")  # normal shift
                 logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
                 stack.pop()
 
         return tags
 
     @classmethod
-    def tags_to_tree(cls, tags: [TetraType], input_seq: [str]) -> Tree:
+    def tags_to_tree(cls, tags: [str], input_seq: [str]) -> Tree:
         expanded_tags = cls.expand_tags(tags)
         root = Tree("X", [])
         created_node_stack = [root]
         for tag in expanded_tags:
-            if tag == TetraType.r:  # shift
+            if tag.startswith('r'):  # shift
                 node = created_node_stack.pop()
                 node.insert(0, input_seq[0])
                 input_seq.pop(0)
-            elif tag == TetraType.R or tag == TetraType.L:
+            elif tag.startswith('R') or tag.startswith('L'):
                 parent = created_node_stack.pop()
-                if tag == TetraType.R:  # normal reduce
+                if tag.startswith('R'):  # normal reduce
                     r_node = Tree("X", [])
                     created_node_stack.append(r_node)
                 else:
