@@ -7,7 +7,7 @@ from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
 from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import random_tree, is_topo_equal, rc_preprocess
+from tree_tools import random_tree, is_topo_equal, rc_preprocess, rc_postprocess
 
 from original_tetratagger import TetraTagSequence
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
@@ -133,6 +133,7 @@ class TestPipeline(unittest.TestCase):
         example_tree = Tree.fromstring(
             "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
         example_tree_rc = rc_preprocess(example_tree)
+        example_tree_rc.pretty_print()
         tagger = BottomUpTetratagger()
         tags = tagger.tree_to_tags(example_tree_rc)
         print(tags)
@@ -144,10 +145,20 @@ class TestPipeline(unittest.TestCase):
         trees = READER.parsed_sents('test')
         tagger = BottomUpTetratagger()
         for tree in trees:
-            print(TetraTagSequence.from_tree(tree))
+            original_tree = tree.copy(deep=True)
+            # tree.pretty_print()
             rc_tree = rc_preprocess(tree)
-            print(tagger.tree_to_tags(rc_tree))
-            break
+            rc_tree.pretty_print()
+            tags = tagger.tree_to_tags(rc_tree)
+            rc_tree_back = tagger.tags_to_tree(tags, tree.leaves())
+            tree_back = rc_postprocess(rc_tree_back, tree.label())
+            # tree_back.pretty_print()
+            try:
+                self.assertEqual(original_tree, tree_back)
+            except:
+                original_tree.pretty_print()
+                tree_back.pretty_print()
+                break
 
 
 if __name__ == '__main__':

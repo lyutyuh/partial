@@ -85,10 +85,11 @@ class BottomUpTetratagger(TetraTagger):
     def tree_to_tags(cls, root: Tree) -> []:
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
-        if lc.label().find("+") != 1:
-            tags.append("l/" + lc.label().split("+")[0])
-        else:
-            tags.append("l")
+        # if lc.label().find("+") != 1:
+        #     tags.append("l/" + lc.label().split("+")[0])
+        # else:
+        #     tags.append("l")
+        tags.append("l/" + lc.label().replace("+", "/"))
         logging.debug("SHIFT {}".format(lc.label()))
         stack = [lc]
 
@@ -112,10 +113,11 @@ class BottomUpTetratagger(TetraTagger):
                 stack.append(lc)
                 logging.debug("<-- \t SHIFT {}".format(lc.label()))
                 # normal shift
-                if lc.label().find("+") != -1:
-                    tags.append("l" + "/" + lc.label().split("+")[0])
-                else:
-                    tags.append("l")
+                # if lc.label().find("+") != -1:
+                #     tags.append("l" + "/" + lc.label().split("+")[0])
+                # else:
+                #     tags.append("l")
+                tags.append("l" + "/" + lc.label().replace("+", "/"))
 
             elif len(stack) >= 2 and (
                     node.right_sibling() == stack[-2] or node.left_sibling() == stack[-2]):
@@ -148,16 +150,32 @@ class BottomUpTetratagger(TetraTagger):
         return tags
 
     @classmethod
-    def _unary_reduce(cls, node, last_node):
-        node.insert(0, Tree("X\\X", ["EPS"]))
+    def _unary_reduce(cls, node, last_node, tag):
+        idx = tag.find("/")
+        label = tag[idx+1:].replace("/", "+")
+        node.insert(0, Tree(label + "\\" + label, ["EPS"]))
         node.insert(1, last_node)
         return node
 
     @classmethod
-    def _reduce(cls, node, last_node, last_2_node):
+    def _reduce(cls, node, last_node, last_2_node, tag):
+        idx = tag.find("/")
+        if idx == -1:
+            label = "X\\" + last_node.label()
+        else:
+            label = "X\\" + tag[idx+1:].replace("/", "+")
+        last_2_node.set_label(label)
         node.insert(0, last_2_node)
         node.insert(1, last_node)
         return node
+
+    @classmethod
+    def _create_pre_terminal_labels(cls, tag: str) -> str:
+        idx = tag.find("/")
+        if idx != -1:
+            return tag[idx+1:].replace("/", "+")
+        else:
+            return "X"
 
     @classmethod
     def tags_to_tree(cls, tags: [str], input_seq: [str]) -> Tree:
@@ -166,17 +184,17 @@ class BottomUpTetratagger(TetraTagger):
         expanded_tags = cls.expand_tags(tags)
         for tag in expanded_tags:
             if tag.startswith('l'):  # shift
-                created_node_stack.append(Tree("X", [input_seq[0]]))
+                created_node_stack.append(Tree(cls._create_pre_terminal_labels(tag), [input_seq[0]]))
                 input_seq.pop(0)
             else:
                 node = Tree("X", [])
                 if tag.startswith('R'):  # normal reduce
                     last_node = created_node_stack.pop()
                     last_2_node = created_node_stack.pop()
-                    created_node_stack.append(cls._reduce(node, last_node, last_2_node))
+                    created_node_stack.append(cls._reduce(node, last_node, last_2_node, tag))
                 elif tag.startswith('L'):  # unary reduce
                     created_node_stack.append(
-                        cls._unary_reduce(node, created_node_stack.pop()))
+                        cls._unary_reduce(node, created_node_stack.pop(), tag))
         if len(input_seq) != 0:
             raise ValueError("All the input sequence is not used")
         return node

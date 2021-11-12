@@ -7,7 +7,6 @@ from nltk import ParentedTree
 from nltk import Tree
 
 
-
 class NodeType(Enum):
     NT = 0
     NT_NT = 1
@@ -76,3 +75,13 @@ def rc_preprocess(tree: Tree) -> ParentedTree:
     tree_rc = ParentedTree(root_label, [])
     RightCornerTransformer.transform(tree_rc, tree, tree)
     return tree_rc
+
+
+def rc_postprocess(rc_tree: ParentedTree, root_label) -> Tree:
+    from transform import RightCornerTransformer
+
+    tree = ParentedTree(root_label, ["", ""])
+    tree = RightCornerTransformer.rev_transform(tree, rc_tree)
+    tree = Tree.convert(tree)
+    tree.un_chomsky_normal_form()
+    return tree
