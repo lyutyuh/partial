@@ -65,15 +65,19 @@ def random_tree(node: ParentedTree, depth=0, p=.75, cutoff=7) -> None:
         node.insert(1, right)
 
 
-def rc_preprocess(tree: Tree) -> ParentedTree:
+def rc_preprocess(tree: Tree, remove_top=False) -> ParentedTree:
     from transform import RightCornerTransformer
 
-    tree.collapse_unary(collapsePOS=True, collapseRoot=True)
-    tree.chomsky_normal_form()
-    tree = ParentedTree.convert(tree)
-    root_label = tree.label()
+    if remove_top:
+        cut_off_tree = tree[0] # remove TOP
+    else:
+        cut_off_tree = tree
+    cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
+    cut_off_tree.chomsky_normal_form()
+    ptree = ParentedTree.convert(cut_off_tree)
+    root_label = ptree.label()
     tree_rc = ParentedTree(root_label, [])
-    RightCornerTransformer.transform(tree_rc, tree, tree)
+    RightCornerTransformer.transform(tree_rc, ptree, ptree)
     return tree_rc
 
 
@@ -84,4 +88,5 @@ def rc_postprocess(rc_tree: ParentedTree, root_label) -> Tree:
     tree = RightCornerTransformer.rev_transform(tree, rc_tree)
     tree = Tree.convert(tree)
     tree.un_chomsky_normal_form()
-    return tree
+    rooted_tree = Tree("TOP", [tree])
+    return rooted_tree

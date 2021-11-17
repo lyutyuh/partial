@@ -11,6 +11,7 @@ from tree_tools import random_tree, is_topo_equal, rc_preprocess, rc_postprocess
 
 from original_tetratagger import TetraTagSequence
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
+from tqdm import tqdm as tq
 
 # logging.getLogger().setLevel(logging.DEBUG)
 
@@ -144,18 +145,21 @@ class TestPipeline(unittest.TestCase):
         READER = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
         trees = READER.parsed_sents('test')
         tagger = BottomUpTetratagger()
-        for tree in trees:
+        for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            # tree.pretty_print()
-            rc_tree = rc_preprocess(tree)
-            rc_tree.pretty_print()
+            original_tags = TetraTagSequence.from_tree(original_tree)
+            rc_tree = rc_preprocess(tree, remove_top=True)
             tags = tagger.tree_to_tags(rc_tree)
-            rc_tree_back = tagger.tags_to_tree(tags, tree.leaves())
-            tree_back = rc_postprocess(rc_tree_back, tree.label())
-            # tree_back.pretty_print()
+            rc_tree_back = tagger.tags_to_tree(tags, tree.pos())
+            tree_back = rc_postprocess(rc_tree_back, tree[0].label())
             try:
                 self.assertEqual(original_tree, tree_back)
+                self.assertEqual(original_tags, tags)
             except:
+                print()
+                print(original_tags)
+                print(tags)
+                print("=" * 100)
                 original_tree.pretty_print()
                 tree_back.pretty_print()
                 break
