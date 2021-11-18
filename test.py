@@ -7,8 +7,7 @@ from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
 from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import random_tree, is_topo_equal, rc_preprocess, rc_postprocess, \
-    lc_postprocess, lc_preprocess
+from tree_tools import random_tree, is_topo_equal
 
 from original_tetratagger import TetraTagSequence
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
@@ -134,10 +133,8 @@ class TestPipeline(unittest.TestCase):
     def test_example_colab(self):
         example_tree = Tree.fromstring(
             "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
-        example_tree_rc = rc_preprocess(example_tree)
-        example_tree_rc.pretty_print()
         tagger = BottomUpTetratagger()
-        tags = tagger.tree_to_tags(example_tree_rc)
+        tags = tagger.tree_to_tags_pipeline(example_tree)
         print(tags)
         for tag in tagger.tetra_visualize(tags):
             print(tag)
@@ -145,14 +142,12 @@ class TestPipeline(unittest.TestCase):
     def compare_to_original_tetratagger(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
         trees = READER.parsed_sents('test')
-        tagger = BottomUpTetratagger()
+        tagger = BottomUpTetratagger(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             original_tags = TetraTagSequence.from_tree(original_tree)
-            rc_tree = rc_preprocess(tree, remove_top=True)
-            tags = tagger.tree_to_tags(rc_tree)
-            rc_tree_back = tagger.tags_to_tree(tags, tree.pos())
-            tree_back = rc_postprocess(rc_tree_back, tree[0].label(), add_top=True)
+            tags = tagger.tree_to_tags_pipeline(tree)
+            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             self.assertEqual(original_tree, tree_back)
             self.assertEqual(original_tags, tags)
 
@@ -160,32 +155,43 @@ class TestPipeline(unittest.TestCase):
         example_tree = Tree.fromstring(
             "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
         original_tree = example_tree.copy(deep=True)
-        print("original tree")
-        example_tree.pretty_print()
-        example_tree_lc = lc_preprocess(example_tree)
-        print("tree leftcornered")
-        example_tree_lc.pretty_print()
         tagger = TopDownTetratagger()
-        tags = tagger.tree_to_tags(example_tree_lc)
+        tags = tagger.tree_to_tags_pipeline(example_tree)
         print(tags)
         for tag in tagger.tetra_visualize(tags):
             print(tag)
-        lc_tree_back = tagger.tags_to_tree(tags, example_tree.pos())
-        lc_tree_back.pretty_print()
-        tree_back = lc_postprocess(lc_tree_back, example_tree.label())
+        tree_back = tagger.tags_to_tree_pipeline(tags, example_tree.pos())
         tree_back.pretty_print()
         self.assertEqual(original_tree, tree_back)
 
     def top_down_tetratagger(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('test')
-        tagger = TopDownTetratagger()
+        tagger = TopDownTetratagger(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            lc_tree = lc_preprocess(tree, remove_top=True)
-            tags = tagger.tree_to_tags(lc_tree)
-            lc_tree_back = tagger.tags_to_tree(tags, tree.pos())
-            tree_back = lc_postprocess(lc_tree_back, tree[0].label(), add_top=True)
+            tags = tagger.tree_to_tags_pipeline(tree)
+            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
+            self.assertEqual(original_tree, tree_back)
+
+    def test_tag_ids_top_down(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('test')
+        tagger = TopDownTetratagger(add_remove_top=True)
+        for tree in tq(trees):
+            original_tree = tree.copy(deep=True)
+            ids = tagger.tree_to_ids_pipeline(tree)
+            tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
+            self.assertEqual(original_tree, tree_back)
+
+    def test_tag_ids_bottom_up(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('test')
+        tagger = BottomUpTetratagger(add_remove_top=True)
+        for tree in tq(trees):
+            original_tree = tree.copy(deep=True)
+            ids = tagger.tree_to_ids_pipeline(tree)
+            tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
 

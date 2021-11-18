@@ -4,7 +4,6 @@ from enum import Enum
 
 import numpy as np
 from nltk import ParentedTree
-from nltk import Tree
 
 
 class NodeType(Enum):
@@ -63,64 +62,3 @@ def random_tree(node: ParentedTree, depth=0, p=.75, cutoff=7) -> None:
         label = "X/" + str(depth)
         right = ParentedTree(label, [random.choice(string.ascii_letters)])
         node.insert(1, right)
-
-
-def binarize(tree: Tree, remove_top=False) -> ParentedTree:
-    if remove_top:
-        cut_off_tree = tree[0]
-    else:
-        cut_off_tree = tree
-    cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
-    cut_off_tree.chomsky_normal_form()
-    ptree = ParentedTree.convert(cut_off_tree)
-    # print("tree after binarization")
-    # ptree.pretty_print()
-    return ptree
-
-
-def rc_preprocess(tree: Tree, remove_top=False) -> ParentedTree:
-    from transform import RightCornerTransformer
-
-    ptree = binarize(tree, remove_top)
-    root_label = ptree.label()
-    tree_rc = ParentedTree(root_label, [])
-    RightCornerTransformer.transform(tree_rc, ptree, ptree)
-    return tree_rc
-
-
-def rc_postprocess(rc_tree: ParentedTree, root_label, add_top=False) -> Tree:
-    from transform import RightCornerTransformer
-
-    tree = ParentedTree(root_label, ["", ""])
-    tree = RightCornerTransformer.rev_transform(tree, rc_tree)
-    tree = Tree.convert(tree)
-    tree.un_chomsky_normal_form()
-    if add_top:
-        return Tree("TOP", [tree])
-    else:
-        return tree
-
-
-def lc_preprocess(tree: Tree, remove_top=False) -> ParentedTree:
-    from transform import LeftCornerTransformer
-
-    ptree = binarize(tree, remove_top)
-    root_label = ptree.label()
-    tree_lc = ParentedTree(root_label, [])
-    LeftCornerTransformer.transform(tree_lc, ptree, ptree)
-    return tree_lc
-
-
-def lc_postprocess(lc_tree: ParentedTree, root_label, add_top=False) -> Tree:
-    from transform import LeftCornerTransformer
-
-    tree = ParentedTree(root_label, ["", ""])
-    tree = LeftCornerTransformer.rev_transform(tree, lc_tree)
-    # print("tree after rev transform")
-    # tree.pretty_print()
-    tree = Tree.convert(tree)
-    tree.un_chomsky_normal_form()
-    if add_top:
-        return Tree("TOP", [tree])
-    else:
-        return tree
