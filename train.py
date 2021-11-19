@@ -4,14 +4,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils.rnn import pad_sequence
 import transformers
+from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
+from torch.nn.utils.rnn import pad_sequence
+
 from tetratagger import BottomUpTetratagger
 
-# We use NLTK for loading and working with parse tree data structures
-from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
-
-assert torch.cuda.is_available()
+# assert torch.cuda.is_available()
 device = torch.device("cuda")
 print("Using device:", device)
 
@@ -181,19 +180,23 @@ class ModelForTetraTagging(transformers.DistilBertForTokenClassification):
         return outputs  # (loss), scores, (hidden_states), (attentions)
 
 
+print("Initialize Tag Vocabs")
 tag_system = BottomUpTetratagger(trees=READER.parsed_sents('train'), add_remove_top=True)
-tokenizer = transformers.AutoTokenizer.from_pretrained(
-    'distilbert-base-uncased', use_fast=True)
+print("Initialize Tokenizer")
+tokenizer = transformers.AutoTokenizer.from_pretrained('distill-bert',
+                                                       use_fast=True)
 assert tokenizer.is_fast, "Only fast tokenizers are supported by this notebook"
 
+print("Create Datasets")
 train_dataset = TetraTaggingDataset('train', tokenizer, tag_system)
 
 # The Trainer framework we're using doesn't allow variable-length sequences at
 # evaluation time, so we pad to length 256.
 eval_dataset = TetraTaggingDataset('dev', tokenizer, tag_system, pad_to_len=256)
 
+print("Generate The Config")
 config = transformers.AutoConfig.from_pretrained(
-    'distilbert-base-uncased',
+    'distill-bert',
     num_labels=len(tag_system.vocab_list),
     id2label={i: label for label, i in tag_system.vocab.items()},
     label2id={label: i for label, i in tag_system.vocab.items()},
@@ -203,8 +206,9 @@ config = transformers.AutoConfig.from_pretrained(
     }
 )
 
+print("Instantiate The Model")
 model = ModelForTetraTagging.from_pretrained(
-    'distilbert-base-uncased', config=config)
+    'distill-bert', config=config)
 
 
 def compute_metrics(p, num_leaf_labels=tag_system.leaf_tag_vocab_size):
@@ -226,6 +230,7 @@ def compute_metrics(p, num_leaf_labels=tag_system.leaf_tag_vocab_size):
     }
 
 
+print("Start Training!")
 training_args = transformers.TrainingArguments(
     output_dir='./results',
     num_train_epochs=4,

@@ -2,6 +2,7 @@ import logging
 
 from nltk import ParentedTree as PTree
 from nltk import Tree
+from tqdm import tqdm as tq
 
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import find_node_type, is_node_epsilon, NodeType
@@ -15,7 +16,7 @@ class TetraTagger:
         self.add_remove_top = add_remove_top
 
         if trees is not None:
-            for tree in trees:
+            for tree in tq(trees):
                 self.tree_to_tags_pipeline(tree)
 
         self.internal_tag_vocab_size = len(
