@@ -235,6 +235,7 @@ training_args = transformers.TrainingArguments(
     output_dir='./results',
     num_train_epochs=4,
     learning_rate=5e-5,
+    dataloader_pin_memory=False,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=32,
     warmup_steps=160,
