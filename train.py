@@ -15,7 +15,7 @@ assert torch.cuda.is_available()
 device = torch.device("cuda")
 print("Using device:", device)
 
-READER = BracketParseCorpusReader('.', ['train', 'dev', 'test'])
+READER = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
 
 BERT_TOKEN_MAPPING = {
     "-LRB-": "(",

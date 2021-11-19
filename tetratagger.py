@@ -8,11 +8,22 @@ from tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class TetraTagger:
-    def __init__(self, add_remove_top=False):
+    def __init__(self, trees=None, add_remove_top=False):
         self.vocab = {'l': 0, 'r': 1, 'L': 2, 'R': 3}
         self.vocab_list = ['l', 'r', 'L', 'R']
         self.first_unused_idx = len(self.vocab_list)
         self.add_remove_top = add_remove_top
+
+        if trees is not None:
+            for tree in trees:
+                self.tree_to_tags_pipeline(tree)
+
+        self.internal_tag_vocab_size = len(
+            [tag for tag in self.vocab_list if tag[0] in "LR"]
+        )
+        self.leaf_tag_vocab_size = len(
+            [tag for tag in self.vocab_list if tag[0] in "lr"]
+        )
 
     def add_tags_to_vocab(self, tags: [str]):
         for tag in tags:
