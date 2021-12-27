@@ -178,7 +178,7 @@ class TestPipeline(unittest.TestCase):
     def test_tag_ids_top_down(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('test')
-        tagger = TopDownTetratagger(add_remove_top=True)
+        tagger = TopDownTetratagger(trees, add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)
@@ -188,7 +188,7 @@ class TestPipeline(unittest.TestCase):
     def test_tag_ids_bottom_up(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('test')
-        tagger = BottomUpTetratagger(add_remove_top=True)
+        tagger = BottomUpTetratagger(trees, add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)
@@ -206,7 +206,8 @@ class TestPipeline(unittest.TestCase):
             tags_td = tagger_td.tree_to_tags_pipeline(original_tree)
             print(tags_bu)
             print(tags_td)
-            print("="*20)
+            print("=" * 20)
+
 
 class TestUFTagger(unittest.TestCase):
     def test_tag_sequence_example(self):
@@ -217,6 +218,16 @@ class TestUFTagger(unittest.TestCase):
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)
             tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
+            self.assertEqual(original_tree, tree_back)
+
+    def test_tag_ids(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('test')
+        tagger = UFTagger(trees, add_remove_top=True)
+        for tree in tq(trees):
+            original_tree = tree.copy(deep=True)
+            ids = tagger.tree_to_ids_pipeline(tree)
+            tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
 

@@ -12,15 +12,12 @@ from tagger import Tagger
 class TetraTagger(Tagger, ABC):
     def __init__(self, trees=None, add_remove_top=False):
         super().__init__(trees, add_remove_top)
-        self.vocab = {'l': 0, 'r': 1, 'L': 2, 'R': 3}
-        self.vocab_list = ['l', 'r', 'L', 'R']
-        self.first_unused_idx = len(self.vocab_list)
 
         self.internal_tag_vocab_size = len(
-            [tag for tag in self.vocab_list if tag[0] in "LR"]
+            [tag for tag in self.tag_vocab if tag[0] in "LR"]
         )
         self.leaf_tag_vocab_size = len(
-            [tag for tag in self.vocab_list if tag[0] in "lr"]
+            [tag for tag in self.tag_vocab if tag[0] in "lr"]
         )
 
     def expand_tags(self, tags: [str]) -> [str]:
@@ -181,7 +178,6 @@ class BottomUpTetratagger(TetraTagger):
                 return
         logging.debug("=" * 20)
 
-        self.add_tags_to_vocab(tags)
         return tags
 
     def _unary_reduce(self, node, last_node, tag):
@@ -277,8 +273,6 @@ class TopDownTetratagger(TetraTagger):
                 tags.append(self.create_shift_tag(node.label(), "r"))  # normal shift
                 logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
                 stack.pop()
-
-        self.add_tags_to_vocab(tags)
         return tags
 
     def postprocess(self, transformed_tree: PTree) -> Tree:
