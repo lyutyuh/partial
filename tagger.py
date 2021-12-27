@@ -62,3 +62,4 @@ class Tagger(ABC):
             return Tree("TOP", [tree])
         else:
             return tree
+

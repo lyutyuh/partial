@@ -22,14 +22,30 @@ class UFTagger(Tagger):
             return "r" + "/" + label.replace("+", "/")
 
     @staticmethod
+    def _create_reduce_label(tag: str) -> str:
+        idx = tag.find("/")
+        if idx == -1:
+            label = "|"  # to mark the second part as an extra node created via binarizaiton
+        else:
+            label = tag[idx + 1:].replace("/", "+")
+        return label
+
+    @staticmethod
     def clump_tags(tags:[str]) -> [str]:
         clumped_tags = []
         for tag in tags:
-            if tag[0] == 's':
+            if tag.startswith('s'):
                 clumped_tags.append(tag)
             else:
                 clumped_tags[-1] = clumped_tags[-1] + " " + tag
         return clumped_tags
+
+    @staticmethod
+    def flatten_tags(tags: [str]) -> [str]:
+        raw_tags = []
+        for tag in tags:
+            raw_tags += tag.split(" ")
+        return raw_tags
 
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
@@ -64,5 +80,27 @@ class UFTagger(Tagger):
                 continue
 
         return self.clump_tags(tags)
+
+    def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
+        tags = self.flatten_tags(tags)
+        created_node_stack = []
+        node = None
+
+        if len(tags) == 1:  # base case
+            assert tags[0].startswith('s')
+            return PTree(input_seq[0][1], [input_seq[0][0]])
+        for tag in tags:
+            if tag.startswith('s'):
+                created_node_stack.append(PTree(input_seq[0][1], [input_seq[0][0]]))
+                input_seq.pop(0)
+            else:
+                last_node = created_node_stack.pop()
+                last_2_node = created_node_stack.pop()
+                node = PTree(self._create_reduce_label(tag), [last_2_node, last_node])
+                created_node_stack.append(node)
+
+        if len(input_seq) != 0:
+            raise ValueError("All the input sequence is not used")
+        return node
 
 

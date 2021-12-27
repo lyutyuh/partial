@@ -14,7 +14,7 @@ from original_tetratagger import TetraTagSequence
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from tqdm import tqdm as tq
 
-logging.getLogger().setLevel(logging.DEBUG)
+# logging.getLogger().setLevel(logging.DEBUG)
 
 np.random.seed(0)
 
@@ -210,13 +210,14 @@ class TestPipeline(unittest.TestCase):
 
 class TestUFTagger(unittest.TestCase):
     def test_tag_sequence_example(self):
-        example_tree = Tree.fromstring(
-            "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
-        original_tree = example_tree.copy(deep=True)
-        original_tree.pretty_print()
-        tagger = UFTagger()
-        tags = tagger.tree_to_tags_pipeline(example_tree)
-        print(tags)
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('test')
+        tagger = UFTagger(add_remove_top=True)
+        for tree in tq(trees):
+            original_tree = tree.copy(deep=True)
+            tags = tagger.tree_to_tags_pipeline(tree)
+            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
+            self.assertEqual(original_tree, tree_back)
 
 
 if __name__ == '__main__':
