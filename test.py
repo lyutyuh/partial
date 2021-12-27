@@ -6,6 +6,7 @@ from nltk import ParentedTree
 from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
+from uftagger import UFTagger
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import random_tree, is_topo_equal
 
@@ -13,7 +14,7 @@ from original_tetratagger import TetraTagSequence
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from tqdm import tqdm as tq
 
-# logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger().setLevel(logging.DEBUG)
 
 np.random.seed(0)
 
@@ -193,6 +194,29 @@ class TestPipeline(unittest.TestCase):
             ids = tagger.tree_to_ids_pipeline(tree)
             tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
             self.assertEqual(original_tree, tree_back)
+
+    def compare_top_down_bottom_up_tags(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('test')
+        tagger_bu = BottomUpTetratagger(add_remove_top=True)
+        tagger_td = TopDownTetratagger(add_remove_top=True)
+        for tree in tq(trees):
+            original_tree = tree.copy(deep=True)
+            tags_bu = tagger_bu.tree_to_tags_pipeline(tree)
+            tags_td = tagger_td.tree_to_tags_pipeline(original_tree)
+            print(tags_bu)
+            print(tags_td)
+            print("="*20)
+
+class TestUFTagger(unittest.TestCase):
+    def test_tag_sequence_example(self):
+        example_tree = Tree.fromstring(
+            "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
+        original_tree = example_tree.copy(deep=True)
+        original_tree.pretty_print()
+        tagger = UFTagger()
+        tags = tagger.tree_to_tags_pipeline(example_tree)
+        print(tags)
 
 
 if __name__ == '__main__':

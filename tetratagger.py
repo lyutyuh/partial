@@ -2,22 +2,19 @@ import logging
 
 from nltk import ParentedTree as PTree
 from nltk import Tree
-from tqdm import tqdm as tq
+from abc import ABC
 
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import find_node_type, is_node_epsilon, NodeType
+from tagger import Tagger
 
 
-class TetraTagger:
+class TetraTagger(Tagger, ABC):
     def __init__(self, trees=None, add_remove_top=False):
+        super().__init__(trees, add_remove_top)
         self.vocab = {'l': 0, 'r': 1, 'L': 2, 'R': 3}
         self.vocab_list = ['l', 'r', 'L', 'R']
         self.first_unused_idx = len(self.vocab_list)
-        self.add_remove_top = add_remove_top
-
-        if trees is not None:
-            for tree in tq(trees):
-                self.tree_to_tags_pipeline(tree)
 
         self.internal_tag_vocab_size = len(
             [tag for tag in self.vocab_list if tag[0] in "LR"]
@@ -26,55 +23,8 @@ class TetraTagger:
             [tag for tag in self.vocab_list if tag[0] in "lr"]
         )
 
-    def add_tags_to_vocab(self, tags: [str]):
-        for tag in tags:
-            if tag not in self.vocab:
-                self.vocab[tag] = self.first_unused_idx
-                self.vocab_list.append(tag)
-                self.first_unused_idx += 1
-
-    def tree_to_tags(self, root: PTree) -> [str]:
-        raise NotImplementedError("tree to tags is not implemented")
-
-    def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
-        raise NotImplementedError("tags to tree is not implemented")
-
     def expand_tags(self, tags: [str]) -> [str]:
         raise NotImplementedError("expand tags is not implemented")
-
-    def tree_to_tags_pipeline(self, tree: Tree) -> [str]:
-        ptree = self.preprocess(tree)
-        return self.tree_to_tags(ptree)
-
-    def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
-        tags = self.tree_to_tags_pipeline(tree)
-        return [self.vocab[tag] for tag in tags]
-
-    def tags_to_tree_pipeline(self, tags: [str], input_seq: []) -> Tree:
-        ptree = self.tags_to_tree(tags, input_seq)
-        return self.postprocess(ptree)
-
-    def ids_to_tree_pipeline(self, ids: [int], input_seq: []) -> Tree:
-        tags = [self.vocab_list[idx] for idx in ids]
-        return self.tags_to_tree_pipeline(tags, input_seq)
-
-    def preprocess(self, tree: Tree) -> PTree:
-        if self.add_remove_top:
-            cut_off_tree = tree[0]
-        else:
-            cut_off_tree = tree
-        cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
-        cut_off_tree.chomsky_normal_form()
-        ptree = PTree.convert(cut_off_tree)
-        return ptree
-
-    def postprocess(self, tree: PTree) -> Tree:
-        tree = Tree.convert(tree)
-        tree.un_chomsky_normal_form()
-        if self.add_remove_top:
-            return Tree("TOP", [tree])
-        else:
-            return tree
 
     @staticmethod
     def tetra_visualize(tags: [str]):
@@ -96,20 +46,20 @@ class TetraTagger:
             return left_or_right
 
     @staticmethod
-    def _create_bi_reduce_tag(label: str) -> str:
+    def _create_bi_reduce_tag(label: str, left_or_right: str) -> str:
         label = label.split("\\")[1]
         if label.find("|") != -1:  # drop extra node labels created after binarization
-            return "R"
+            return left_or_right
         else:
-            return "R" + "/" + label.replace("+", "/")
+            return left_or_right + "/" + label.replace("+", "/")
 
     @staticmethod
-    def _create_unary_reduce_tag(label: str) -> str:
+    def _create_unary_reduce_tag(label: str, left_or_right: str) -> str:
         label = label.split("\\")[0]
         if label.find("|") != -1:  # drop extra node labels created after binarization
-            return "L"
+            return left_or_right
         else:
-            return "L" + "/" + label.replace("+", "/")
+            return left_or_right + "/" + label.replace("+", "/")
 
     @staticmethod
     def create_merge_shift_tag(label: str, left_or_right: str) -> str:
@@ -210,7 +160,7 @@ class BottomUpTetratagger(TetraTagger):
                     *(prev_node.label(), node.label(), node.parent().label())))
 
                 tags.append(
-                    self._create_bi_reduce_tag(prev_node.label()))  # normal reduce
+                    self._create_bi_reduce_tag(prev_node.label(), "R"))  # normal reduce
                 stack.pop()
                 stack.pop()
                 stack.append(node.parent())
@@ -223,7 +173,7 @@ class BottomUpTetratagger(TetraTagger):
                     "<== \t REDUCE[ {0} --> {1} ]".format(
                         *(node.label(), node.parent().label())))
                 tags.append(self._create_unary_reduce_tag(
-                    node.parent().label()))  # unary reduce
+                    node.parent().label(), "L"))  # unary reduce
                 stack.pop()
                 stack.append(node.parent())
             else:
@@ -283,7 +233,7 @@ class TopDownTetratagger(TetraTagger):
         new_tags = []
         for tag in tags:
             if tag.startswith('l'):
-                new_tags.append("R")
+                new_tags.append("L")
                 new_tags.append("r" + tag[1:])
             else:
                 new_tags.append(tag)
@@ -316,10 +266,10 @@ class TopDownTetratagger(TetraTagger):
                 else:
                     if not is_node_epsilon(node[1]):
                         stack.append(node[1])
-                        tags.append(self._create_bi_reduce_tag(node[1].label()))
+                        tags.append(self._create_bi_reduce_tag(node[1].label(), "L"))
                         # normal reduce
                     else:
-                        tags.append(self._create_unary_reduce_tag(node[1].label()))
+                        tags.append(self._create_unary_reduce_tag(node[1].label(), "R"))
                         # unary reduce
                     stack.append(node[0])
 
@@ -351,7 +301,7 @@ class TopDownTetratagger(TetraTagger):
                 input_seq.pop(0)
             elif tag.startswith('R') or tag.startswith('L'):
                 parent = created_node_stack.pop()
-                if tag.startswith('R'):  # normal reduce
+                if tag.startswith('L'):  # normal reduce
                     label = self._create_reduce_label(tag)
                     r_node = PTree(label, [])
                     created_node_stack.append(r_node)
