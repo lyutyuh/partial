@@ -36,6 +36,12 @@ class SRTagger(Tagger):
         self._stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=np.int32
         )
+        self._stack_depth_change_by_id = np.concatenate(
+            [
+                self._stack_depth_change_by_id,
+                self._stack_depth_change_by_id
+            ]
+        )
 
     @staticmethod
     def create_shift_tag(label: str) -> str:
