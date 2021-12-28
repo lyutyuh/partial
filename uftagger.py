@@ -9,12 +9,18 @@ from transform import LeftCornerTransformer
 
 
 class UFTagger(Tagger):
+    def __init__(self, trees=None, add_remove_top=False):
+        super().__init__(trees, add_remove_top)
+
     def add_trees_to_vocab(self, trees: []) -> None:
+        self.transition_vocab = set()
         for tree in tq(trees):
             for tag in self.tree_to_tags_pipeline(tree):
+                self.tag_vocab.add(tag)
                 for subtag in tag.split(" "):
-                    self.tag_vocab.add(subtag)
+                    self.transition_vocab.add(subtag)
         self.tag_vocab = sorted(self.tag_vocab)
+        self.transition_vocab = sorted(self.transition_vocab)
 
     def clumped_tag_to_clumped_ids(self, tags: [str]) -> [str]:
         clumped_ids = []
@@ -36,10 +42,10 @@ class UFTagger(Tagger):
 
     def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
         tags = self.tree_to_tags_pipeline(tree)
-        return self.clumped_tag_to_clumped_ids(tags)
+        return [self.tag_vocab.index(tag) for tag in tags]
 
     def ids_to_tree_pipeline(self, ids: [int], input_seq: []) -> Tree:
-        tags = self.clumped_ids_to_clumped_tags(ids)
+        tags = [self.tag_vocab[id] for id in ids]
         return self.tags_to_tree_pipeline(tags, input_seq)
 
     @staticmethod

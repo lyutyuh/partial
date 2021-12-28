@@ -230,6 +230,23 @@ class TestUFTagger(unittest.TestCase):
             tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
+    def test_max_length(self):
+        READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('train')
+        tagger = UFTagger(trees, add_remove_top=True)
+        print(len(tagger.tag_vocab))
+        print(len(tagger.transition_vocab))
+        max_len = 0
+        max_tag = ""
+        for tree in tq(trees):
+            tags = tagger.tree_to_tags_pipeline(tree)
+            for tag in tags:
+                if len(tag.split(" ")) > max_len:
+                    max_len = len(tag.split(" "))
+                    max_tag = tag
+        print(max_len)
+        print(max_tag)
+
 
 if __name__ == '__main__':
     unittest.main()
