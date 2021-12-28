@@ -6,7 +6,7 @@ from nltk import ParentedTree
 from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
-from uftagger import UFTagger
+from srtagger import SRTagger
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import random_tree, is_topo_equal
 
@@ -213,7 +213,7 @@ class TestUFTagger(unittest.TestCase):
     def test_tag_sequence_example(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('test')
-        tagger = UFTagger(add_remove_top=True)
+        tagger = SRTagger(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)
@@ -223,7 +223,7 @@ class TestUFTagger(unittest.TestCase):
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('test')
-        tagger = UFTagger(trees, add_remove_top=True)
+        tagger = SRTagger(trees, add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)
@@ -233,21 +233,8 @@ class TestUFTagger(unittest.TestCase):
     def test_max_length(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('train')
-        tagger = UFTagger(trees, add_remove_top=True)
+        tagger = SRTagger(trees, add_remove_top=True)
         print(len(tagger.tag_vocab))
-        print(len(tagger.transition_vocab))
-        max_len = 0
-        max_tag = ""
-        for tree in tq(trees):
-            if len(tree.leaves()) > 60:
-                continue
-            tags = tagger.tree_to_tags_pipeline(tree)
-            for tag in tags:
-                if len(tag.split(" ")) > max_len:
-                    max_len = len(tag.split(" "))
-                    max_tag = tag
-        print(max_len)
-        print(max_tag)
 
 
 if __name__ == '__main__':

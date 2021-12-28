@@ -8,45 +8,7 @@ from tagger import Tagger
 from transform import LeftCornerTransformer
 
 
-class UFTagger(Tagger):
-    def __init__(self, trees=None, add_remove_top=False):
-        super().__init__(trees, add_remove_top)
-
-    def add_trees_to_vocab(self, trees: []) -> None:
-        self.transition_vocab = set()
-        for tree in tq(trees):
-            for tag in self.tree_to_tags_pipeline(tree):
-                self.tag_vocab.add(tag)
-                for subtag in tag.split(" "):
-                    self.transition_vocab.add(subtag)
-        self.tag_vocab = sorted(self.tag_vocab)
-        self.transition_vocab = sorted(self.transition_vocab)
-
-    def clumped_tag_to_clumped_ids(self, tags: [str]) -> [str]:
-        clumped_ids = []
-        for tag in tags:
-            indices = []
-            for subtag in tag.split(" "):
-                indices.append(str(self.tag_vocab.index(subtag)))
-            clumped_ids.append(" ".join(indices))
-        return clumped_ids
-
-    def clumped_ids_to_clumped_tags(self, ids: [str]) -> [str]:
-        clumped_tags = []
-        for id in ids:
-            tags = []
-            for sub_id in id.split(" "):
-                tags.append(self.tag_vocab[int(sub_id)])
-            clumped_tags.append(" ".join(tags))
-        return clumped_tags
-
-    def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
-        tags = self.tree_to_tags_pipeline(tree)
-        return [self.tag_vocab.index(tag) for tag in tags]
-
-    def ids_to_tree_pipeline(self, ids: [int], input_seq: []) -> Tree:
-        tags = [self.tag_vocab[id] for id in ids]
-        return self.tags_to_tree_pipeline(tags, input_seq)
+class SRTagger(Tagger):
 
     @staticmethod
     def create_shift_tag(label: str) -> str:
@@ -119,11 +81,9 @@ class UFTagger(Tagger):
             elif stack[0].parent() is None and len(stack) == 1:
                 stack.pop()
                 continue
-
-        return self.clump_tags(tags)
+        return tags
 
     def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
-        tags = self.flatten_tags(tags)
         created_node_stack = []
         node = None
 
