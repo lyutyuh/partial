@@ -239,6 +239,8 @@ class TestUFTagger(unittest.TestCase):
         max_len = 0
         max_tag = ""
         for tree in tq(trees):
+            if len(tree.leaves()) > 60:
+                continue
             tags = tagger.tree_to_tags_pipeline(tree)
             for tag in tags:
                 if len(tag.split(" ")) > max_len:
