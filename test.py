@@ -222,8 +222,8 @@ class TestUFTagger(unittest.TestCase):
 
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('data', ['train', 'dev', ' test'])
-        trees = READER.parsed_sents('test')
-        tagger = SRTagger(trees, add_remove_top=True)
+        trees = READER.parsed_sents('dev')
+        tagger = SRTagger(READER.parsed_sents('train'), add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)

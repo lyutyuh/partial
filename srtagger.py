@@ -36,12 +36,6 @@ class SRTagger(Tagger):
         self._stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=np.int32
         )
-        self._stack_depth_change_by_id = np.concatenate(
-            [
-                self._stack_depth_change_by_id,
-                self._stack_depth_change_by_id
-            ]
-        )
 
     @staticmethod
     def create_shift_tag(label: str) -> str:
@@ -151,9 +145,9 @@ class SRTagger(Tagger):
                 continue
             if last_t is not None:
                 beam_search.advance(
-                    logits[last_t, :] + self._odd_tags_only
+                    logits[last_t, :len(self.tag_vocab)]
                 )
-            beam_search.advance(logits[t, :] + self._even_tags_only)
+            beam_search.advance(logits[t, len(self.tag_vocab):])
             last_t = t
 
         score, best_tag_ids = beam_search.get_path()
