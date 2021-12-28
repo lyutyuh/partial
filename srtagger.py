@@ -12,8 +12,8 @@ import numpy as np
 
 
 class SRTagger(Tagger):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, trees=None, add_remove_top=False):
+        super().__init__(trees, add_remove_top)
 
         is_even_mask = np.concatenate(
             [
