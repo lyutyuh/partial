@@ -15,17 +15,6 @@ class SRTagger(Tagger):
     def __init__(self, trees=None, add_remove_top=False):
         super().__init__(trees, add_remove_top)
 
-        is_even_mask = np.concatenate(
-            [
-                np.zeros(len(self.tag_vocab)),
-                np.ones(len(self.tag_vocab)),
-            ]
-        )
-        self._odd_tags_only = np.asarray(-1e9 * is_even_mask, dtype=float)
-        self._even_tags_only = np.asarray(
-            -1e9 * (1 - is_even_mask), dtype=float
-        )
-
         stack_depth_change_by_id = [None] * len(self.tag_vocab)
         for i, tag in enumerate(self.tag_vocab):
             if tag.startswith("s"):
