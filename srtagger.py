@@ -26,6 +26,19 @@ class SRTagger(Tagger):
             stack_depth_change_by_id, dtype=np.int32
         )
 
+    def add_trees_to_vocab(self, trees: []) -> None:
+        self.label_vocab = set()
+        for tree in tq(trees):
+            for tag in self.tree_to_tags_pipeline(tree):
+                self.tag_vocab.add(tag)
+                idx = tag.find("/")
+                if idx != -1:
+                    self.label_vocab.add(tag[idx+1:])
+                else:
+                    self.label_vocab.add("")
+        self.tag_vocab = sorted(self.tag_vocab)
+        self.label_vocab = sorted(self.label_vocab)
+
     @staticmethod
     def create_shift_tag(label: str) -> str:
         if label.find("+") != -1:
