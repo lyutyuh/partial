@@ -53,7 +53,6 @@ class Tagger(ABC):
 
     def postprocess(self, tree: PTree) -> Tree:
         tree = Tree.convert(tree)
-        tree.pretty_print()
         tree.un_chomsky_normal_form()
         if self.add_remove_top:
             return Tree("TOP", [tree])
