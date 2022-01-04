@@ -60,7 +60,6 @@ class ModelForConditionalIndependance(transformers.DistilBertForTokenClassificat
 
             nll = self.crf(em, extended_labels, mask=mask)
             # outputs = (nll,) + outputs
-            print(outputs)
 
             return nll, outputs.logits
 
