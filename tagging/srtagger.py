@@ -4,9 +4,9 @@ from nltk import ParentedTree as PTree
 from nltk import Tree
 from tqdm import tqdm as tq
 
-from decode import BeamSearch
-from tagger import Tagger
-from transform import LeftCornerTransformer
+from learning.decode import BeamSearch
+from tagging.tagger import Tagger
+from tagging.transform import LeftCornerTransformer
 
 import numpy as np
 

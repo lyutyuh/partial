@@ -1,5 +1,5 @@
 from nltk import ParentedTree as PTree
-from tree_tools import find_node_type, is_node_epsilon, NodeType
+from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class Transformer:

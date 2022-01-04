@@ -1,3 +1,4 @@
+# Code is adopted from https://github.com/mtreviso/linear-chain-crf
 import torch
 from torch import nn
 
@@ -17,7 +18,7 @@ class CRF(nn.Module):
     """
 
     def __init__(
-            self, nb_labels, bos_tag_id, eos_tag_id, device, pad_tag_id=None,
+            self, nb_labels, bos_tag_id, eos_tag_id, pad_tag_id, device,
             batch_first=True
     ):
         super().__init__()

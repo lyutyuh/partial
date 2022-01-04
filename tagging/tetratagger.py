@@ -6,7 +6,7 @@ from abc import ABC
 
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import find_node_type, is_node_epsilon, NodeType
-from tagger import Tagger
+from tagging.tagger import Tagger
 
 
 class TetraTagger(Tagger, ABC):
