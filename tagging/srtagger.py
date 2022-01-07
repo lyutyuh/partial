@@ -147,9 +147,9 @@ class SRTagger(Tagger):
                 continue
             if last_t is not None:
                 beam_search.advance(
-                    logits[last_t, :len(self.tag_vocab)]
+                    logits[last_t, len(self.tag_vocab):]
                 )
-            beam_search.advance(logits[t, len(self.tag_vocab):])
+            beam_search.advance(logits[t, :len(self.tag_vocab)])
             last_t = t
 
         score, best_tag_ids = beam_search.get_path()
