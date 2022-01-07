@@ -134,6 +134,7 @@ class SRTagger(Tagger):
         return node
 
     def ids_from_logits(self, logits: [], mask) -> [int]:
+        print("new version")
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
