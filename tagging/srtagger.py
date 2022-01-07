@@ -134,7 +134,6 @@ class SRTagger(Tagger):
         return node
 
     def ids_from_logits(self, logits: [], mask) -> [int]:
-        print("new version2")
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
@@ -148,9 +147,9 @@ class SRTagger(Tagger):
                 continue
             if last_t is not None:
                 beam_search.advance(
-                    logits[last_t, :-len(self.tag_vocab)]
+                    logits[last_t, -len(self.tag_vocab):]
                 )
-            beam_search.advance(logits[t, -len(self.tag_vocab):])
+            beam_search.advance(logits[t, :-len(self.tag_vocab)])
             last_t = t
 
         score, best_tag_ids = beam_search.get_path()
