@@ -1,67 +1,60 @@
-from learning.crf import CRF
-import transformers
 import torch
+import transformers
 from torch import nn
+from transformers import DistilBertForTokenClassification
 
-MINUS_INF = -10000.0
+from learning.crf import CRF
 
 
-class ModelForConditionalIndependance(transformers.DistilBertForTokenClassification):
+class ModelForConditionalIndependance(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+        self.bert = DistilBertForTokenClassification.from_pretrained('distill-bert',
+                                                                     config=config)
         self.crf = CRF(
-            self.num_tags + 3,
-            0,
-            1,
-            2,
-            device,
+            self.num_tags,
             batch_first=True,
         )
 
-    def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            head_mask=None,
-            inputs_embeds=None,
-            labels=None,
-            output_attentions=None,
-            output_hidden_states=None,
-    ):
-        outputs = super().forward(
+    def forward(self, input_ids,
+                attention_mask=None,
+                head_mask=None,
+                inputs_embeds=None,
+                labels=None,
+                output_attentions=None,
+                output_hidden_states=None, ):
+        outputs = self.bert.forward(
             input_ids,
             attention_mask=attention_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-        )
+            output_hidden_states=output_hidden_states, )
+
+        logits = outputs[0]
+
+        batch_size, seq_length, nb_tags = logits.shape
+        em = logits.reshape(batch_size, seq_length * 2, -1)
+
+        mask = attention_mask.repeat_interleave(2, dim=1).type(torch.uint8)
+
+        nll = None
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if labels is not None:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            logits = outputs[0]
-            batch_size, seq_length, nb_tags = logits.shape
-            em = torch.cat(
-                [torch.full((batch_size, seq_length * 2, 3), MINUS_INF).to(device),
-                 logits.reshape(batch_size, seq_length * 2, -1)], dim=-1)
+            odd_labels = (labels // (self.num_tags + 1)) - 1
+            even_labels = (labels % (self.num_tags + 1)) - 1
 
-            mask = attention_mask.repeat_interleave(2, dim=1).type(torch.uint8)
-            score, path = self.crf.decode(em, mask=mask)
-
-            odd_labels = (labels // (self.num_tags + 1)) + 2
-            even_labels = (labels % (self.num_tags + 1)) + 2
             extended_labels = torch.zeros((batch_size, seq_length * 2), dtype=torch.long).to(
                 device)
             extended_labels[:, ::2] = even_labels
             extended_labels[:, 1::2] = odd_labels
-            # labels = torch.cat((odd_labels, even_labels), dim=1)
+
+            mask[extended_labels == -1] = 0
+            extended_labels[extended_labels == -1] = 0
 
             nll = self.crf(em, extended_labels, mask=mask)
-            # outputs = (nll,) + outputs
-
-            return nll, outputs.logits
+        return nll, logits
 
 
 class ModelForTetraTagging(transformers.DistilBertForTokenClassification):

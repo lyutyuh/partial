@@ -23,8 +23,7 @@ class SRTagger(Tagger):
                 stack_depth_change_by_id[i] = -1
         assert None not in stack_depth_change_by_id
         self._stack_depth_change_by_id = np.array(
-            stack_depth_change_by_id, dtype=np.int32
-        )
+            stack_depth_change_by_id, dtype=int)
 
     def add_trees_to_vocab(self, trees: []) -> None:
         self.label_vocab = set()

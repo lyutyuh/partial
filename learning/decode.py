@@ -27,7 +27,7 @@ class BeamSearch:
         self.keep_per_depth = keep_per_depth
 
         # Initialize the beam
-        scores = np.zeros(1, dtype=np.float32)
+        scores = np.zeros(1, dtype=float)
         stack_depths = np.full(1, initial_stack_depth)
         prev = backptrs = labels = None
         if initial_label is not None:

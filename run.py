@@ -18,7 +18,7 @@ train_dataset = TaggingDataset('train', tokenizer, tag_system, reader, device)
 eval_dataset = TaggingDataset('dev', tokenizer, tag_system, reader, device, pad_to_len=256)
 
 config = transformers.AutoConfig.from_pretrained(
-    'distilbert-base-uncased',
+    'distill-bert',
     num_labels = 2*len(tag_system.tag_vocab),
     task_specific_params = {
       'num_tags': len(tag_system.tag_vocab),
