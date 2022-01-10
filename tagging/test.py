@@ -140,7 +140,7 @@ class TestPipeline(unittest.TestCase):
         for tag in tagger.tetra_visualize(tags):
             print(tag)
 
-    def compare_to_original_tetratagger(self):
+    def test_compare_to_original_tetratagger(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', 'test'])
         trees = READER.parsed_sents('test')
         tagger = BottomUpTetratagger(add_remove_top=True)

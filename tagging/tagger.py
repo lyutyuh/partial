@@ -31,7 +31,8 @@ class Tagger(ABC):
 
     def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
         tags = self.tree_to_tags_pipeline(tree)
-        return [self.tag_vocab.index(tag) for tag in tags]
+        return [self.tag_vocab.index(tag) if tag in self.tag_vocab else self.tag_vocab.index(
+            tag[0]) for tag in tags]
 
     def tags_to_tree_pipeline(self, tags: [str], input_seq: []) -> Tree:
         ptree = self.tags_to_tree(tags, input_seq)
