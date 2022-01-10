@@ -7,8 +7,8 @@ from nltk import Tree
 
 from learning.decode import BeamSearch
 from tagging.tagger import Tagger
-from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import find_node_type, is_node_epsilon, NodeType
+from tagging.transform import LeftCornerTransformer, RightCornerTransformer
+from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class TetraTagger(Tagger, ABC):
