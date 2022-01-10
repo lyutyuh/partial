@@ -1,12 +1,14 @@
 import logging
-
-from nltk import ParentedTree as PTree
-from nltk import Tree
 from abc import ABC
 
+import numpy as np
+from nltk import ParentedTree as PTree
+from nltk import Tree
+
+from learning.decode import BeamSearch
+from tagging.tagger import Tagger
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import find_node_type, is_node_epsilon, NodeType
-from tagging.tagger import Tagger
 
 
 class TetraTagger(Tagger, ABC):
@@ -18,6 +20,30 @@ class TetraTagger(Tagger, ABC):
         )
         self.leaf_tag_vocab_size = len(
             [tag for tag in self.tag_vocab if tag[0] in "lr"]
+        )
+
+        is_leaf_mask = np.concatenate(
+            [
+                np.zeros(self.internal_tag_vocab_size),
+                np.ones(self.leaf_tag_vocab_size),
+            ]
+        )
+        self._internal_tags_only = np.asarray(-1e9 * is_leaf_mask, dtype=float)
+        self._leaf_tags_only = np.asarray(
+            -1e9 * (1 - is_leaf_mask), dtype=float
+        )
+
+        stack_depth_change_by_id = [None] * len(self.tag_vocab)
+        for i, tag in enumerate(self.tag_vocab):
+            if tag.startswith("l"):
+                stack_depth_change_by_id[i] = +1
+            elif tag.startswith("R"):
+                stack_depth_change_by_id[i] = -1
+            else:
+                stack_depth_change_by_id[i] = 0
+        assert None not in stack_depth_change_by_id
+        self._stack_depth_change_by_id = np.array(
+            stack_depth_change_by_id, dtype=np.int32
         )
 
     def expand_tags(self, tags: [str]) -> [str]:
@@ -101,6 +127,28 @@ class TetraTagger(Tagger, ABC):
                 return False
             prev_state = state
         return True
+
+    def logits_to_ids(self, logits: [], mask) -> [int]:
+        beam_search = BeamSearch(
+            initial_stack_depth=0,
+            stack_depth_change_by_id=self._stack_depth_change_by_id,
+            max_depth=12,
+            keep_per_depth=1,
+        )
+
+        last_t = None
+        for t in range(logits.shape[0]):
+            if mask is not None and not mask[t]:
+                continue
+            if last_t is not None:
+                beam_search.advance(
+                    logits[last_t, :] + self._internal_tags_only
+                )
+            beam_search.advance(logits[t, :] + self._leaf_tags_only)
+            last_t = t
+
+        score, best_tag_ids = beam_search.get_path()
+        return best_tag_ids
 
 
 class BottomUpTetratagger(TetraTagger):

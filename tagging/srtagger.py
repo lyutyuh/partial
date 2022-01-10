@@ -132,7 +132,7 @@ class SRTagger(Tagger):
             raise ValueError("All the input sequence is not used")
         return node
 
-    def ids_from_logits(self, logits: [], mask) -> [int]:
+    def logits_to_ids(self, logits: [], mask) -> [int]:
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
@@ -153,7 +153,3 @@ class SRTagger(Tagger):
 
         score, best_tag_ids = beam_search.get_path()
         return best_tag_ids
-
-    def tree_from_logits(self, logits: [], leave_nodes: [], mask=None) -> Tree:
-        ids = self.ids_from_logits(logits, mask)
-        return self.ids_to_tree_pipeline(ids, leave_nodes)

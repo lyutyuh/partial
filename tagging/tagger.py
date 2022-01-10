@@ -41,6 +41,13 @@ class Tagger(ABC):
         tags = [self.tag_vocab[idx] for idx in ids]
         return self.tags_to_tree_pipeline(tags, input_seq)
 
+    def logits_to_ids(self, logits: [], mask) -> [int]:
+        raise NotImplementedError("logits to ids is not implemented")
+
+    def logits_to_tree(self, logits: [], leave_nodes: [], mask=None) -> Tree:
+        ids = self.logits_to_ids(logits, mask)
+        return self.ids_to_tree_pipeline(ids, leave_nodes)
+
     def preprocess(self, tree: Tree) -> PTree:
         if self.add_remove_top:
             cut_off_tree = tree[0]
@@ -58,4 +65,3 @@ class Tagger(ABC):
             return Tree("TOP", [tree])
         else:
             return tree
-
