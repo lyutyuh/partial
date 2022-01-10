@@ -6,7 +6,7 @@ from nltk import ParentedTree
 from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
-from tagging.srtagger import SRTagger
+from tagging.srtagger import SRTagger, SRTaggerTopDown
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import random_tree, is_topo_equal
 
@@ -213,7 +213,7 @@ class TestSRTagger(unittest.TestCase):
     def test_tag_sequence_example(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('dev')
-        tagger = SRTagger(add_remove_top=True)
+        tagger = SRTaggerTopDown(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)
@@ -224,10 +224,25 @@ class TestSRTagger(unittest.TestCase):
             tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
+    def test_example_both_version(self):
+        import nltk
+        example_tree = nltk.Tree.fromstring(
+            "(TOP (S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .)))")
+        td_tagger = SRTaggerTopDown(add_remove_top=True)
+        bu_tagger = SRTagger(add_remove_top=True)
+        t1 = example_tree.copy(deep=True)
+        t2 = example_tree.copy(deep=True)
+        td_tags = td_tagger.tree_to_tags_pipeline(t1)
+        bu_tags = bu_tagger.tree_to_tags_pipeline(t2)
+        print(list(td_tags))
+        print(list(bu_tags))
+
+
+
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('dev')
-        tagger = SRTagger(READER.parsed_sents('train'), add_remove_top=True)
+        tagger = SRTaggerTopDown(READER.parsed_sents('train'), add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)

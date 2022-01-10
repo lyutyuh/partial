@@ -10,6 +10,8 @@ from tagging.transform import LeftCornerTransformer
 
 import numpy as np
 
+from tagging.tree_tools import find_node_type, NodeType
+
 
 class SRTagger(Tagger):
     def __init__(self, trees=None, add_remove_top=False):
@@ -32,7 +34,7 @@ class SRTagger(Tagger):
                 self.tag_vocab.add(tag)
                 idx = tag.find("/")
                 if idx != -1:
-                    self.label_vocab.add(tag[idx+1:])
+                    self.label_vocab.add(tag[idx + 1:])
                 else:
                     self.label_vocab.add("")
         self.tag_vocab = sorted(self.tag_vocab)
@@ -60,23 +62,6 @@ class SRTagger(Tagger):
         else:
             label = tag[idx + 1:].replace("/", "+")
         return label
-
-    @staticmethod
-    def clump_tags(tags: [str]) -> [str]:
-        clumped_tags = []
-        for tag in tags:
-            if tag.startswith('s'):
-                clumped_tags.append(tag)
-            else:
-                clumped_tags[-1] = clumped_tags[-1] + " " + tag
-        return clumped_tags
-
-    @staticmethod
-    def flatten_tags(tags: [str]) -> [str]:
-        raw_tags = []
-        for tag in tags:
-            raw_tags += tag.split(" ")
-        return raw_tags
 
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
@@ -153,3 +138,58 @@ class SRTagger(Tagger):
 
         score, best_tag_ids = beam_search.get_path()
         return best_tag_ids
+
+
+class SRTaggerTopDown(SRTagger):
+    def tree_to_tags(self, root: PTree) -> [str]:
+        stack: [PTree] = [root]
+        tags = []
+
+        while len(stack) > 0:
+            node = stack[-1]
+
+            if find_node_type(node) == NodeType.NT:
+                stack.pop()
+                logging.debug("REDUCE[ {0} --> {1} {2}]".format(
+                    *(node.label(), node[0].label(), node[1].label())))
+                tags.append(self.create_reduce_tag(node.label()))
+                stack.append(node[1])
+                stack.append(node[0])
+
+            else:
+                logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
+                tags.append(self.create_shift_tag(node.label()))
+                stack.pop()
+
+        return tags
+
+    def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
+        if len(tags) == 1:  # base case
+            assert tags[0].startswith('s')
+            return PTree(input_seq[0][1], [input_seq[0][0]])
+
+        assert tags[0].startswith('r')
+        node = PTree(self._create_reduce_label(tags[0]), [])
+        created_node_stack: [PTree] = [node]
+
+        for tag in tags[1:]:
+            parent:PTree = created_node_stack[-1]
+            if tag.startswith('s'):
+                new_node = PTree(input_seq[0][1], [input_seq[0][0]])
+                input_seq.pop(0)
+            else:
+                label = self._create_reduce_label(tag)
+                new_node = PTree(label, [])
+
+            if len(parent) == 0:
+                parent.insert(0, new_node)
+            elif len(parent) == 1:
+                parent.insert(1, new_node)
+                created_node_stack.pop()
+
+            if tag.startswith('r'):
+                created_node_stack.append(new_node)
+
+        if len(input_seq) != 0:
+            raise ValueError("All the input sequence is not used")
+        return node
