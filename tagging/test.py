@@ -6,7 +6,7 @@ from nltk import ParentedTree
 from nltk import Tree
 
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
-from tagging.srtagger import SRTagger, SRTaggerTopDown
+from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import random_tree, is_topo_equal
 
@@ -229,15 +229,13 @@ class TestSRTagger(unittest.TestCase):
         example_tree = nltk.Tree.fromstring(
             "(TOP (S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .)))")
         td_tagger = SRTaggerTopDown(add_remove_top=True)
-        bu_tagger = SRTagger(add_remove_top=True)
+        bu_tagger = SRTaggerBottomUp(add_remove_top=True)
         t1 = example_tree.copy(deep=True)
         t2 = example_tree.copy(deep=True)
         td_tags = td_tagger.tree_to_tags_pipeline(t1)
         bu_tags = bu_tagger.tree_to_tags_pipeline(t2)
         print(list(td_tags))
         print(list(bu_tags))
-
-
 
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
@@ -252,9 +250,8 @@ class TestSRTagger(unittest.TestCase):
     def test_max_length(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('train')
-        tagger = SRTagger(trees, add_remove_top=True)
+        tagger = SRTaggerBottomUp(trees, add_remove_top=True)
         print(len(tagger.tag_vocab))
-
 
 
 if __name__ == '__main__':

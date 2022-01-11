@@ -2,14 +2,14 @@ from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 
 from learning.dataset import TaggingDataset
 from learning.model import ModelForConditionalIndependance
-from tagging.srtagger import SRTagger
+from tagging.srtagger import SRTaggerBottomUp
 import transformers
 import torch
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
-tag_system = SRTagger(trees=reader.parsed_sents('train'))
+tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'))
 tokenizer = transformers.AutoTokenizer.from_pretrained(
     'distilbert-base-uncased', use_fast=True)
 assert tokenizer.is_fast, "Only fast tokenizers are supported"

@@ -68,28 +68,6 @@ class CRF(nn.Module):
         partition = self._compute_log_partition(emissions, mask=mask)
         return torch.sum(scores - partition)
 
-    def decode(self, emissions, mask=None):
-        """Find the most probable sequence of labels given the emissions using
-        the Viterbi algorithm.
-        Args:
-            emissions (torch.Tensor): Sequence of emissions for each label.
-                Shape (batch_size, seq_len, nb_labels) if batch_first is True,
-                (seq_len, batch_size, nb_labels) otherwise.
-            mask (torch.FloatTensor, optional): Tensor representing valid positions.
-                If None, all positions are considered valid.
-                Shape (batch_size, seq_len) if batch_first is True,
-                (seq_len, batch_size) otherwise.
-        Returns:
-            torch.Tensor: the viterbi score for the for each batch.
-                Shape of (batch_size,)
-            list of lists: the best viterbi sequence of labels for each batch.
-        """
-        if mask is None:
-            mask = torch.ones(emissions.shape[:2], dtype=torch.float).to(self.device)
-
-        scores, sequences = self._viterbi_decode(emissions, mask)
-        return scores, sequences
-
     def _compute_scores(self, emissions, tags, mask, last_idx=None):
         """Compute the scores for a given batch of emissions with their tags.
         Args:

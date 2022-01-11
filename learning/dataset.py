@@ -43,7 +43,7 @@ def ptb_unescape(sent):
 
 
 class TaggingDataset(torch.utils.data.Dataset):
-    def __init__(self, split, tokenizer, tag_system, reader, device, pad_to_len=None,
+    def __init__(self, split, tokenizer, tag_system, reader, device, is_tetratags=False, pad_to_len=None,
                  max_train_len=60):
         assert split in ('train', 'dev', 'test')
         self.reader = reader
@@ -53,6 +53,7 @@ class TaggingDataset(torch.utils.data.Dataset):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.pad_to_len = pad_to_len
         self.device = device
+        self.is_tetratags = is_tetratags
 
         if split == 'train' and max_train_len is not None:
             # To speed up training, we only train on short sentences.
@@ -78,9 +79,15 @@ class TaggingDataset(torch.utils.data.Dataset):
         tag_ids = [tag_id + 1 for tag_id in tag_ids] + [0]
         tag_ids = torch.tensor(tag_ids, dtype=torch.long).to(self.device)
         labels = torch.zeros_like(input_ids).to(self.device)
-        even_labels = tag_ids[::2]
+
         odd_labels = tag_ids[1::2]
-        labels[word_end_positions] = (
+        if self.is_tetratags:
+            even_labels = tag_ids[::2] - self.tag_system.internal_tag_vocab_size
+            labels[word_end_positions] = (
+                    odd_labels * (len(self.tag_system.leaf_tag_vocab_size) + 1) + even_labels)
+        else:
+            even_labels = tag_ids[::2]
+            labels[word_end_positions] = (
                 odd_labels * (len(self.tag_system.tag_vocab) + 1) + even_labels)
 
         if self.pad_to_len is not None:

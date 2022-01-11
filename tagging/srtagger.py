@@ -1,7 +1,7 @@
 import logging
+from abc import ABC
 
 from nltk import ParentedTree as PTree
-from nltk import Tree
 from tqdm import tqdm as tq
 
 from learning.decode import BeamSearch
@@ -13,20 +13,7 @@ import numpy as np
 from tagging.tree_tools import find_node_type, NodeType
 
 
-class SRTagger(Tagger):
-    def __init__(self, trees=None, add_remove_top=False):
-        super().__init__(trees, add_remove_top)
-
-        stack_depth_change_by_id = [None] * len(self.tag_vocab)
-        for i, tag in enumerate(self.tag_vocab):
-            if tag.startswith("s"):
-                stack_depth_change_by_id[i] = +1
-            elif tag.startswith("r"):
-                stack_depth_change_by_id[i] = -1
-        assert None not in stack_depth_change_by_id
-        self._stack_depth_change_by_id = np.array(
-            stack_depth_change_by_id, dtype=int)
-
+class SRTagger(Tagger, ABC):
     def add_trees_to_vocab(self, trees: []) -> None:
         self.label_vocab = set()
         for tree in tq(trees):
@@ -62,6 +49,21 @@ class SRTagger(Tagger):
         else:
             label = tag[idx + 1:].replace("/", "+")
         return label
+
+
+class SRTaggerBottomUp(SRTagger):
+    def __init__(self, trees=None, add_remove_top=False):
+        super().__init__(trees, add_remove_top)
+
+        stack_depth_change_by_id = [None] * len(self.tag_vocab)
+        for i, tag in enumerate(self.tag_vocab):
+            if tag.startswith("s"):
+                stack_depth_change_by_id[i] = +1
+            elif tag.startswith("r"):
+                stack_depth_change_by_id[i] = -1
+        assert None not in stack_depth_change_by_id
+        self._stack_depth_change_by_id = np.array(
+            stack_depth_change_by_id, dtype=int)
 
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
@@ -141,6 +143,19 @@ class SRTagger(Tagger):
 
 
 class SRTaggerTopDown(SRTagger):
+    def __init__(self, trees=None, add_remove_top=False):
+        super().__init__(trees, add_remove_top)
+
+        stack_depth_change_by_id = [None] * len(self.tag_vocab)
+        for i, tag in enumerate(self.tag_vocab):
+            if tag.startswith("s"):
+                stack_depth_change_by_id[i] = -1
+            elif tag.startswith("r"):
+                stack_depth_change_by_id[i] = +1
+        assert None not in stack_depth_change_by_id
+        self._stack_depth_change_by_id = np.array(
+            stack_depth_change_by_id, dtype=int)
+
     def tree_to_tags(self, root: PTree) -> [str]:
         stack: [PTree] = [root]
         tags = []
@@ -173,7 +188,7 @@ class SRTaggerTopDown(SRTagger):
         created_node_stack: [PTree] = [node]
 
         for tag in tags[1:]:
-            parent:PTree = created_node_stack[-1]
+            parent: PTree = created_node_stack[-1]
             if tag.startswith('s'):
                 new_node = PTree(input_seq[0][1], [input_seq[0][0]])
                 input_seq.pop(0)
