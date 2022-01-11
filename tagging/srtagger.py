@@ -119,7 +119,7 @@ class SRTaggerBottomUp(SRTagger):
             raise ValueError("All the input sequence is not used")
         return node
 
-    def logits_to_ids(self, logits: [], mask) -> [int]:
+    def logits_to_ids(self, logits: [], mask, crf_transitions=None) -> [int]:
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
@@ -128,14 +128,19 @@ class SRTaggerBottomUp(SRTagger):
         )
 
         last_t = None
+        seq_len = sum(mask)
+        idx = 1
         for t in range(logits.shape[0]):
             if mask is not None and not mask[t]:
                 continue
             if last_t is not None:
                 beam_search.advance(
-                    logits[last_t, -len(self.tag_vocab):]
+                    logits[last_t, :-len(self.tag_vocab)]
                 )
-            beam_search.advance(logits[t, :-len(self.tag_vocab)])
+            if idx == seq_len:
+                beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=True)
+            else:
+                beam_search.advance(logits[t, -len(self.tag_vocab):])
             last_t = t
 
         score, best_tag_ids = beam_search.get_path()
@@ -146,15 +151,33 @@ class SRTaggerTopDown(SRTagger):
     def __init__(self, trees=None, add_remove_top=False):
         super().__init__(trees, add_remove_top)
 
+        reduce_tag_vocab_size = len(
+            [tag for tag in self.tag_vocab if tag[0].startswith('r')])
+        shift_tag_vocab_size = len(
+            [tag for tag in self.tag_vocab if tag[0].startswith('s')])
+        is_shift_mask = np.concatenate(
+            [
+                np.zeros(reduce_tag_vocab_size),
+                np.ones(shift_tag_vocab_size),
+            ]
+        )
+        self._reduce_tags_only = np.asarray(-1e9 * is_shift_mask, dtype=float)
+
         stack_depth_change_by_id = [None] * len(self.tag_vocab)
+        stack_depth_change_by_id_l2 = [None] * len(self.tag_vocab)
         for i, tag in enumerate(self.tag_vocab):
             if tag.startswith("s"):
+                stack_depth_change_by_id_l2[i] = 0
                 stack_depth_change_by_id[i] = -1
             elif tag.startswith("r"):
+                stack_depth_change_by_id_l2[i] = -1
                 stack_depth_change_by_id[i] = +1
         assert None not in stack_depth_change_by_id
+        assert None not in stack_depth_change_by_id_l2
         self._stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=int)
+        self._stack_depth_change_by_id_l2 = np.array(
+            stack_depth_change_by_id_l2, dtype=int)
 
     def tree_to_tags(self, root: PTree) -> [str]:
         stack: [PTree] = [root]
@@ -208,3 +231,35 @@ class SRTaggerTopDown(SRTagger):
         if len(input_seq) != 0:
             raise ValueError("All the input sequence is not used")
         return node
+
+    def logits_to_ids(self, logits: [], mask, crf_transitions=None) -> [int]:
+        beam_search = BeamSearch(
+            initial_stack_depth=0,
+            stack_depth_change_by_id=self._stack_depth_change_by_id,
+            stack_depth_change_by_id_l2=self._stack_depth_change_by_id_l2,
+            max_depth=12,
+            keep_per_depth=1,
+        )
+
+        last_t = None
+        seq_len = sum(mask)
+        idx = 1
+        is_last = False
+        for t in range(logits.shape[0]):
+            if mask is not None and not mask[t]:
+                continue
+            if last_t is not None:
+                beam_search.advance(
+                    logits[last_t, :-len(self.tag_vocab)]
+                )
+            if idx == seq_len:
+                is_last = True
+            if last_t is None:
+                beam_search.advance(logits[t, -len(self.tag_vocab):] + self._reduce_tags_only,
+                                    is_last=is_last)
+            else:
+                beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)
+            last_t = t
+
+        score, best_tag_ids = beam_search.get_path()
+        return best_tag_ids

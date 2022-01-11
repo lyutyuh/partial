@@ -19,12 +19,17 @@ class BeamSearch:
             stack_depth_change_by_id,
             max_depth=12,
             keep_per_depth=1,
+            stack_depth_change_by_id_l2=None,
+            crf_transitions=None,
             initial_label=None,
     ):
         # Save parameters
         self.stack_depth_change_by_id = stack_depth_change_by_id
+        self.stack_depth_change_by_id_l2 = stack_depth_change_by_id_l2
         self.valid_depths = np.arange(1, max_depth)
         self.keep_per_depth = keep_per_depth
+        self.max_depth = max_depth
+        self.crf_transitions = crf_transitions
 
         # Initialize the beam
         scores = np.zeros(1, dtype=float)
@@ -34,15 +39,47 @@ class BeamSearch:
             labels = np.full(1, initial_label)
         self.beam = Beam(scores, stack_depths, prev, backptrs, labels)
 
-    def advance(self, label_logits):
+    def compute_new_scores(self, label_log_probs, is_last):
+        if self.crf_transitions is None:
+            return self.beam.scores[:, None] + label_log_probs
+        else:
+            if self.beam.labels is not None:
+                all_new_scores = self.beam.scores[:, None] + label_log_probs + \
+                                 self.crf_transitions["transitions"][self.beam.labels]
+            else:
+                all_new_scores = self.beam.scores[:, None] + label_log_probs + \
+                                 self.crf_transitions["start_transitions"]
+            if is_last:
+                all_new_scores += self.crf_transitions["end_transitions"]
+            return all_new_scores
+
+    # This extra mask layer takes care of invalid reduce actions when there is not an empty
+    # slot in the tree, which is needed in the top-down shift reduce tagging schema
+    def extra_mask_layer(self, all_new_scores, all_new_stack_depths):
+        depth_mask = np.zeros(all_new_stack_depths.shape)
+        depth_mask[all_new_stack_depths < 0] = -np.inf
+        depth_mask[all_new_stack_depths > self.max_depth] = -np.inf
+        all_new_scores = all_new_scores + depth_mask
+
+        all_new_stack_depths = (
+                all_new_stack_depths
+                + self.stack_depth_change_by_id
+        )
+        return all_new_scores, all_new_stack_depths
+
+    def advance(self, label_logits, is_last=False):
         label_log_probs = label_logits
 
-        all_new_scores = self.beam.scores[:, None] + label_log_probs
+        all_new_scores = self.compute_new_scores(label_log_probs, is_last)
 
         all_new_stack_depths = (
                 self.beam.stack_depths[:, None]
                 + self.stack_depth_change_by_id[None, :]
         )
+
+        if self.stack_depth_change_by_id_l2 is not None:
+            all_new_scores, all_new_stack_depths = self.extra_mask_layer(all_new_scores,
+                                                                         all_new_stack_depths)
 
         masked_scores = all_new_scores[None, :, :] + np.where(
             all_new_stack_depths[None, :, :]
