@@ -114,22 +114,3 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
 def initialized_training_pipeline(args):
     pass
 
-
-def compute_metrics(p, num_leaf_labels=len(tag_system.tag_vocab)):
-    """Computes accuracies for both leaf and internal tagging decisions."""
-    print(p)
-    leaf_predictions = p.predictions[..., -num_leaf_labels:]
-    internal_predictions = p.predictions[..., :-num_leaf_labels]
-    leaf_labels = p.label_ids % (num_leaf_labels + 1) - 1
-    internal_labels = p.label_ids // (num_leaf_labels + 1) - 1
-
-    leaf_predictions = leaf_predictions[leaf_labels != -1].argmax(-1)
-    internal_predictions = internal_predictions[internal_labels != -1].argmax(-1)
-
-    leaf_labels = leaf_labels[leaf_labels != -1]
-    internal_labels = internal_labels[internal_labels != -1]
-
-    return {
-        'internal_accuracy': (internal_predictions == internal_labels).mean(),
-        'leaf_accuracy': (leaf_predictions == leaf_labels).mean(),
-    }
