@@ -59,8 +59,10 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
         original_tree = eval_dataset.trees[i]
         try:  # ignore the ones that failed in unchomsky_normal_form
             tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word)
-        except:
-            continue
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print(message)
         if tree.leaves() != original_tree.leaves():
             continue
         predicted_dev_trees.append(tree)

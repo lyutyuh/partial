@@ -123,6 +123,7 @@ class SRTaggerBottomUp(SRTagger):
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
+            crf_transitions=crf_transitions,
             max_depth=12,
             keep_per_depth=1,
         )
@@ -237,6 +238,7 @@ class SRTaggerTopDown(SRTagger):
             initial_stack_depth=1,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
             stack_depth_change_by_id_l2=self._stack_depth_change_by_id_l2,
+            crf_transitions=crf_transitions,
             max_depth=12,
             min_depth=0,
             keep_per_depth=1,
