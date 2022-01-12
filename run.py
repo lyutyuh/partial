@@ -228,10 +228,12 @@ def evaluate(args):
     model = torch.load(args.model_path + args.model_name)
     if tagging_schema == TETRATAGGER:
         num_leaf_labels = tag_system.leaf_tag_vocab_size
+        num_tags = len(tag_system.tag_vocab)
     else:
         num_leaf_labels = len(tag_system.tag_vocab)
+        num_tags = 2*len(tag_system.tag_vocab)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       len(tag_system.tag_vocab), device)
+                                       num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name)
