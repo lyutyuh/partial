@@ -199,6 +199,7 @@ def train(args):
 
 
 def evaluate(args):
+    wandb.init(project="pat", entity="afraamini", resume=True)
     tagging_schema = args.model_name.split("-")[0]
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema)
