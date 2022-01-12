@@ -98,7 +98,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
                 'num_tags': len(tag_system.tag_vocab),
             }
         )
-    elif model_type == BERT and tagging_shcema == TETRATAGGER:
+    elif model_type == BERT and tagging_schema == TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
             num_labels=len(tag_system.tag_vocab),
@@ -110,7 +110,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
                 'num_odd_tags': tag_system.internal_tag_vocab_size,
             }
         )
-    elif model_type == BERT and tagging_shcema != TETRATAGGER:
+    elif model_type == BERT and tagging_schema != TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
             num_labels=2 * len(tag_system.tag_vocab),
