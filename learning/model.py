@@ -18,7 +18,7 @@ def calc_loss_helper(logits, labels, attention_mask, num_even_tags, num_odd_tags
         active_loss = attention_mask.view(-1) == 1
         active_even_logits = even_logits.view(-1, num_even_tags)
         active_odd_logits = odd_logits.view(
-            -1, num_even_tags)
+            -1, num_odd_tags)
         active_even_labels = torch.where(
             active_loss, even_labels.view(-1),
             torch.tensor(loss_fct.ignore_index).type_as(even_labels)
@@ -41,7 +41,8 @@ class BertCRFModel(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
-        self.bert = DistilBertForTokenClassification.from_pretrained('distill-bert',
+        self.model_path = config.task_specific_params['model_path']
+        self.bert = DistilBertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         self.crf = CRF(
             self.num_tags,
@@ -92,7 +93,8 @@ class BertLSTMModel(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
-        self.bert = DistilBertForTokenClassification.from_pretrained('distill-bert',
+        self.model_path = config.task_specific_params['model_path']
+        self.bert = DistilBertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         self.lstm = nn.LSTM(
             self.num_tags, self.num_tags, 2, batch_first=True, bidirectional=True,
@@ -160,6 +162,4 @@ class ModelForTetratagging(transformers.DistilBertForTokenClassification):
         if labels is not None:
             loss = calc_loss_helper(outputs[0], labels, attention_mask, self.num_even_tags,
                                     self.num_odd_tags)
-            outputs = (loss,) + outputs
-
         return loss, outputs[0]
