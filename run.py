@@ -1,23 +1,51 @@
+import argparse
 import logging
 
 import torch
 import transformers
+import wandb
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from torch.utils.data import DataLoader
 from transformers import AdamW
+from tqdm import tqdm as tq
 
 from learning.dataset import TaggingDataset
 from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
 
+logging.getLogger().setLevel(logging.INFO)
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
 
-TETRATAGGER = "tetratagger"
-TD_SR = "top-down shift-reduce"
-BU_SR = "bottom-up shift-reduce"
+TETRATAGGER = "tetra"
+TD_SR = "td-sr"
+BU_SR = "bu-sr"
+BERT = "bert"
+BERTCRF = "bert+crf"
+BERTLSTM = "bert+lstm"
+
 MODEL_NAME = 'distilbert'
+
+parser = argparse.ArgumentParser()
+subparser = parser.add_subparsers(dest='command')
+train = subparser.add_parser('train')
+
+train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
+                   help="Tagging schema")
+train.add_argument('--model', choices=[BERT, BERTCRF, BERTLSTM], required=True,
+                   help="Model architecture")
+
+train.add_argument('--model-path', type=str, default='distilbert',
+                   help="Bert model path or name")
+train.add_argument('--output-path', type=str, default='pat-models/',
+                   help="Path to save trained models")
+
+train.add_argument('--lr', type=float, default=5e-5)
+train.add_argument('--epochs', type=int, default=4)
+train.add_argument('--batch-size', type=int, default=16)
+train.add_argument('--num-warmup-steps', type=int, default=160)
 
 
 def initialize_tag_system(tagging_schema):
@@ -33,7 +61,7 @@ def initialize_tag_system(tagging_schema):
     return tag_system
 
 
-def prepare_training_data(tag_system, tagging_schema):
+def prepare_training_data(tag_system, tagging_schema, batch_size):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(MODEL_NAME, truncation=True,
                                                            use_fast=True)
@@ -42,39 +70,42 @@ def prepare_training_data(tag_system, tagging_schema):
     eval_dataset = TaggingDataset('dev', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     train_dataloader = DataLoader(
-        train_dataset, shuffle=True, batch_size=16, collate_fn=train_dataset.collate
+        train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
     )
     eval_dataloader = DataLoader(
-        eval_dataset, batch_size=16, collate_fn=eval_dataset.collate
+        eval_dataset, batch_size=batch_size, collate_fn=eval_dataset.collate
     )
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def generate_config(model_type, tagging_shcema, tag_system):
-    if model_type == "bert+crf" or model_type == "bert":
+def generate_config(model_type, tagging_shcema, tag_system, model_path):
+    if model_type == BERTCRF or model_type == BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
             num_labels=2 * len(tag_system.tag_vocab),
             task_specific_params={
+                'model_path': model_path,
                 'num_tags': len(tag_system.tag_vocab),
             }
         )
-    elif model_type == "bert" and tagging_shcema == TETRATAGGER:
+    elif model_type == BERT and tagging_shcema == TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
             num_labels=len(tag_system.tag_vocab),
             id2label={i: label for i, label in enumerate(tag_system.tag_vocab)},
             label2id={label: i for i, label in enumerate(tag_system.tag_vocab)},
             task_specific_params={
+                'model_path': model_path,
                 'num_even_tags': tag_system.leaf_tag_vocab_size,
                 'num_odd_tags': tag_system.internal_tag_vocab_size,
             }
         )
-    elif model_type == "bert" and tagging_shcema != TETRATAGGER:
+    elif model_type == BERT and tagging_shcema != TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
             num_labels=2 * len(tag_system.tag_vocab),
             task_specific_params={
+                'model_path': model_path,
                 'num_even_tags': len(tag_system.tag_vocab),
                 'num_odd_tags': len(tag_system.tag_vocab),
             }
@@ -85,13 +116,13 @@ def generate_config(model_type, tagging_shcema, tag_system):
     return config
 
 
-def initialize_model(model_type, tagging_schema, tag_system):
-    config = generate_config(model_type, tagging_schema, tag_system)
-    if model_type == "bert+crf":
+def initialize_model(model_type, tagging_schema, tag_system, model_path):
+    config = generate_config(model_type, tagging_schema, tag_system, model_path)
+    if model_type == BERTCRF:
         model = BertCRFModel(config=config)
-    elif model_type == "bert+lstm":
+    elif model_type == BERTLSTM:
         model = BertLSTMModel(config=config)
-    elif model_type == "bert":
+    elif model_type == BERT:
         model = ModelForTetratagging.from_pretrained(MODEL_NAME, config=config)
     else:
         logging.error("Invalid model type")
@@ -109,8 +140,66 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
         num_warmup_steps=160,  # 160
         num_training_steps=num_training_steps,
     )
-    return optimizer, lr_scheduler, num_warmup_steps
+    return optimizer, lr_scheduler, num_training_steps
 
-def initialized_training_pipeline(args):
+
+def initialize_wandb(project_name, entity, args):
+    wandb.login(key="3359278b072f94def90f2781a308a0c596fddb62")
+    wandb.init(project=project_name, entity=entity)
+    run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
+    wandb.run.name = run_name
+    wandb.config = {
+        "learning_rate": args.lr,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size
+    }
+    return run_name
+
+
+def train(args):
+    logging.info("Initializing Tag System")
+    tag_system = initialize_tag_system(args.tagger)
+    logging.info("Preparing Data")
+    train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
+        tag_system, args.tagger, args.batch_size)
+    logging.info("Initializing The Model")
+    model = initialize_model(args.model, args.tagger, tag_system, args.model_path)
+    optimizer, lr_scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
+                                                                                     train_dataloader,
+                                                                                     args.lr,
+                                                                                     args.epochs,
+                                                                                     args.num_warmup_steps)
+    run_name = initialize_wandb("pat", "afraamini",
+                                args)  # TODO: remove the credentials later
+    model.to(device)
+    logging.info("Starting The Training Loop")
+    model.train()
+    for _ in tq(range(args.epochs)):
+        for batch in tq(train_dataloader):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**batch)
+            loss = outputs[0]
+            loss.backward()
+            wandb.log({"loss": loss})
+
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+
+    torch.save(model, args.output_path + run_name)
+    return model, eval_dataset, eval_dataloader
+
+
+def evaluate(eval_dataset, eval_dataloader, model):
     pass
 
+
+def main():
+    args = parser.parse_args()
+    if args.command == 'train':
+        model, eval_dataset, eval_dataloader = train(args)
+        return
+
+
+if __name__ == '__main__':
+    main()
