@@ -13,6 +13,9 @@ from learning.dataset import TaggingDataset
 from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
+from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy
+
+logging.getLogger().setLevel(logging.INFO)
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -31,6 +34,7 @@ MODEL_NAME = 'distilbert'
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
 train = subparser.add_parser('train')
+evaluate = subparser.add_parser('evaluate')
 
 train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
                    help="Tagging schema")
@@ -46,6 +50,12 @@ train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
 train.add_argument('--batch-size', type=int, default=16)
 train.add_argument('--num-warmup-steps', type=int, default=160)
+
+
+evaluate.add_argument('--model-name', type=str, required=True)
+evaluate.add_argument('--model-path', type=str, default='pat-models/')
+evaluate.add_argument('--output-path', type=str, default='results/')
+evaluate.add_argument('--batch-size', type=int, default=16)
 
 
 def initialize_tag_system(tagging_schema):
@@ -78,7 +88,7 @@ def prepare_training_data(tag_system, tagging_schema, batch_size):
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def generate_config(model_type, tagging_shcema, tag_system, model_path):
+def generate_config(model_type, tagging_schema, tag_system, model_path):
     if model_type == BERTCRF or model_type == BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
             MODEL_NAME,
@@ -144,7 +154,6 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
 
 
 def initialize_wandb(project_name, entity, args):
-    wandb.login(key="3359278b072f94def90f2781a308a0c596fddb62")
     wandb.init(project=project_name, entity=entity)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     wandb.run.name = run_name
@@ -187,18 +196,33 @@ def train(args):
             optimizer.zero_grad()
 
     torch.save(model, args.output_path + run_name)
-    return model, eval_dataset, eval_dataloader
 
 
-def evaluate(eval_dataset, eval_dataloader, model):
-    pass
+def evaluate(args):
+    tagging_schema = args.model_name.split("-")[0]
+    logging.info("Initializing Tag System")
+    tag_system = initialize_tag_system(tagging_schema)
+    logging.info("Preparing Data")
+    _, eval_dataset, _, eval_dataloader = prepare_training_data(
+        tag_system, tagging_schema, args.batch_size)
+    model = torch.load(args.model_path + args.model_name)
+    if tagging_schema == TETRATAGGER:
+        num_leaf_labels = tag_system.leaf_tag_vocab_size
+    else:
+        num_leaf_labels = len(tag_system.tag_vocab)
+    predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
+                                       len(tag_system.tag_vocab), device)
+    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels)
+    calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
+                    args.model_name)
 
 
 def main():
     args = parser.parse_args()
     if args.command == 'train':
-        model, eval_dataset, eval_dataloader = train(args)
-        return
+        train(args)
+    elif args.command == 'evaluate':
+        evaluate(args)
 
 
 if __name__ == '__main__':
