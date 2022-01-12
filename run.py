@@ -193,7 +193,6 @@ def train(args):
             optimizer.zero_grad()
 
     torch.save(model, args.output_path + run_name)
-    return model, eval_dataset, eval_dataloader
 
 
 def evaluate(args):
@@ -214,11 +213,13 @@ def evaluate(args):
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name)
 
+
 def main():
     args = parser.parse_args()
     if args.command == 'train':
-        model, eval_dataset, eval_dataloader = train(args)
-        return
+        train(args)
+    elif args.command == 'evaluate':
+        evaluate(args)
 
 
 if __name__ == '__main__':
