@@ -18,6 +18,7 @@ class BeamSearch:
             initial_stack_depth,
             stack_depth_change_by_id,
             max_depth=12,
+            min_depth=1,
             keep_per_depth=1,
             stack_depth_change_by_id_l2=None,
             crf_transitions=None,
@@ -26,7 +27,7 @@ class BeamSearch:
         # Save parameters
         self.stack_depth_change_by_id = stack_depth_change_by_id
         self.stack_depth_change_by_id_l2 = stack_depth_change_by_id_l2
-        self.valid_depths = np.arange(1, max_depth)
+        self.valid_depths = np.arange(min_depth, max_depth)
         self.keep_per_depth = keep_per_depth
         self.max_depth = max_depth
         self.crf_transitions = crf_transitions
