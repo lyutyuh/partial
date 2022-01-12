@@ -26,7 +26,7 @@ def predict(model, eval_dataloader, dataset_size, num_tags, device):
     return predictions, eval_labels
 
 
-def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels):
+def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, use_wandb):
     even_predictions = predictions[..., -num_leaf_labels:]
     odd_predictions = predictions[..., :-num_leaf_labels]
     even_labels = eval_labels % (num_leaf_labels + 1) - 1
@@ -44,11 +44,13 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels):
     logging.info('odd_tags_accuracy: {}'.format(odd_acc))
     logging.info('even_tags_accuracy: {}'.format(even_acc))
 
-    wandb.log({"odd_tags_accuracy": odd_acc})
-    wandb.log({"even_tags_accuracy": even_acc})
+    if use_wandb:
+        wandb.log({"odd_tags_accuracy": odd_acc})
+        wandb.log({"even_tags_accuracy": even_acc})
 
 
-def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path, model_name):
+def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,
+                    model_name):
     predicted_dev_trees = []
     gold_dev_trees = []
     for i in tq(range(predictions.shape[0])):
@@ -63,8 +65,8 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
             continue
         predicted_dev_trees.append(tree)
         gold_dev_trees.append(original_tree)
-    save_predictions(predicted_dev_trees, output_path+"_"+model_name+"_predictions.txt")
-    save_predictions(gold_dev_trees, output_path+"_"+model_name+"_gold.txt")
+    save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
+    save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
 
 
 def save_predictions(predicted_trees, file_path):

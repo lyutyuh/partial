@@ -29,7 +29,12 @@ BERT = "bert"
 BERTCRF = "bert+crf"
 BERTLSTM = "bert+lstm"
 
-MODEL_NAME = 'distilbert'
+MODEL_NAME = "distilbert"
+
+# project and entity names for wandb
+# TODO: remove the credentials later
+PROJECT = "pat"
+ENTITY = "afraamini"
 
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
@@ -45,17 +50,20 @@ train.add_argument('--model-path', type=str, default='distilbert',
                    help="Bert model path or name")
 train.add_argument('--output-path', type=str, default='pat-models/',
                    help="Path to save trained models")
+train.add_argument('--use-wandb', type=bool, default=True,
+                   help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
 train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
 train.add_argument('--batch-size', type=int, default=16)
 train.add_argument('--num-warmup-steps', type=int, default=160)
 
-
 evaluate.add_argument('--model-name', type=str, required=True)
 evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
+evaluate.add_argument('--use-wandb', type=bool, default=True,
+                   help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
 
 def initialize_tag_system(tagging_schema):
@@ -153,9 +161,8 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
     return optimizer, lr_scheduler, num_training_steps
 
 
-def initialize_wandb(project_name, entity, args):
+def initialize_wandb(project_name, entity, run_name, args):
     wandb.init(project=project_name, entity=entity)
-    run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     wandb.run.name = run_name
     wandb.config = {
         "learning_rate": args.lr,
@@ -178,8 +185,10 @@ def train(args):
                                                                                      args.lr,
                                                                                      args.epochs,
                                                                                      args.num_warmup_steps)
-    run_name = initialize_wandb("pat", "afraamini",
-                                args)  # TODO: remove the credentials later
+    run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
+    if args.use_wandb:
+        run_name = initialize_wandb(PROJECT, ENTITY,
+                                run_name, args)
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
@@ -189,7 +198,8 @@ def train(args):
             outputs = model(**batch)
             loss = outputs[0]
             loss.backward()
-            wandb.log({"loss": loss})
+            if args.use_wandb:
+                wandb.log({"loss": loss})
 
             optimizer.step()
             lr_scheduler.step()
@@ -198,9 +208,18 @@ def train(args):
     torch.save(model, args.output_path + run_name)
 
 
+def get_tagging_schema_from_model_name(model_name):
+    tagging_schema = model_name.split("-")[0]
+    if tagging_schema == "td" or tagging_schema == "bu":
+        return tagging_schema + "-sr"
+    else:
+        return tagging_schema
+
+
 def evaluate(args):
-    wandb.init(project="pat", entity="afraamini", resume=True)
-    tagging_schema = args.model_name.split("-")[0]
+    if args.use_wandb:
+        wandb.init(project=PROJECT, entity=ENTITY, resume=True)
+    tagging_schema = get_tagging_schema_from_model_name(args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema)
     logging.info("Preparing Data")
@@ -213,7 +232,7 @@ def evaluate(args):
         num_leaf_labels = len(tag_system.tag_vocab)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        len(tag_system.tag_vocab), device)
-    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels)
+    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name)
 
