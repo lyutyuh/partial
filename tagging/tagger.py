@@ -6,11 +6,13 @@ from tqdm import tqdm as tq
 
 
 class Tagger(ABC):
-    def __init__(self, trees=None, add_remove_top=False):
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
         self.tag_vocab = set()
         self.add_remove_top = add_remove_top
 
-        if trees is not None:
+        if tag_vocab is not None:
+            self.tag_vocab = tag_vocab
+        elif trees is not None:
             self.add_trees_to_vocab(trees)
 
     def add_trees_to_vocab(self, trees: []) -> None:

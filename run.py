@@ -1,5 +1,6 @@
 import argparse
 import logging
+import pickle
 
 import torch
 import transformers
@@ -40,9 +41,15 @@ parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
 train = subparser.add_parser('train')
 evaluate = subparser.add_parser('evaluate')
+vocab = subparser.add_parser('vocab')
+
+vocab.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
+                   help="Tagging schema")
+vocab.add_argument('--output-path', choices=[TETRATAGGER, TD_SR, BU_SR], default="data/")
 
 train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
                    help="Tagging schema")
+train.add_argument('--tag-vocab-path', type=str, default="data/")
 train.add_argument('--model', choices=[BERT, BERTCRF, BERTLSTM], required=True,
                    help="Model architecture")
 
@@ -59,6 +66,7 @@ train.add_argument('--batch-size', type=int, default=16)
 train.add_argument('--num-warmup-steps', type=int, default=160)
 
 evaluate.add_argument('--model-name', type=str, required=True)
+evaluate.add_argument('--tag-vocab-path', type=str, default="data/")
 evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
@@ -66,17 +74,27 @@ evaluate.add_argument('--use-wandb', type=bool, default=True,
                    help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
 
-def initialize_tag_system(tagging_schema):
+def initialize_tag_system(tagging_schema, tag_vocab_path=""):
+    tag_vocab = None
+    if tag_vocab_path != "":
+        with open(tag_vocab_path + tagging_schema + '.pkl', 'rb') as f:
+            tag_vocab = pickle.load(f)
     if tagging_schema == BU_SR:
-        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'))
+        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
     elif tagging_schema == TD_SR:
-        tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'))
+        tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
     elif tagging_schema == TETRATAGGER:
-        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'), add_remove_top=True)
+        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
     else:
         logging.error("Please specify the tagging schema")
         return
     return tag_system
+
+
+def save_vocab(args):
+    tag_system = initialize_tag_system(args.tagger)
+    with open(args.output_path + args.tagger + '.pkl', 'wb') as f:
+        pickle.dump(tag_system.tag_vocab, f)
 
 
 def prepare_training_data(tag_system, tagging_schema, batch_size):
@@ -174,7 +192,7 @@ def initialize_wandb(project_name, entity, run_name, args):
 
 def train(args):
     logging.info("Initializing Tag System")
-    tag_system = initialize_tag_system(args.tagger)
+    tag_system = initialize_tag_system(args.tagger, args.tag_vocab_path)
     logging.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
         tag_system, args.tagger, args.batch_size)
@@ -221,7 +239,7 @@ def evaluate(args):
         wandb.init(project=PROJECT, entity=ENTITY, resume=True)
     tagging_schema = get_tagging_schema_from_model_name(args.model_name)
     logging.info("Initializing Tag System")
-    tag_system = initialize_tag_system(tagging_schema)
+    tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
     _, eval_dataset, _, eval_dataloader = prepare_training_data(
         tag_system, tagging_schema, args.batch_size)
@@ -245,6 +263,8 @@ def main():
         train(args)
     elif args.command == 'evaluate':
         evaluate(args)
+    elif args.command == 'vocab':
+        save_vocab(args)
 
 
 if __name__ == '__main__':
