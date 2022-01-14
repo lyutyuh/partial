@@ -44,9 +44,11 @@ class BertCRFModel(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         self.bert = DistilBertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.crf = CRF(
             self.num_tags,
             batch_first=True,
+            device=device
         )
 
     def forward(self, input_ids,
