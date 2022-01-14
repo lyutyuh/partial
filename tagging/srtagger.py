@@ -182,7 +182,7 @@ class SRTaggerTopDown(SRTagger):
                 stack_depth_change_by_id[i] = -1
             elif tag.startswith("r"):
                 stack_depth_change_by_id_l2[i] = -1
-                stack_depth_change_by_id[i] = +1
+                stack_depth_change_by_id[i] = +2
         assert None not in stack_depth_change_by_id
         assert None not in stack_depth_change_by_id_l2
         self._stack_depth_change_by_id = np.array(
