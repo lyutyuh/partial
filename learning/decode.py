@@ -73,14 +73,18 @@ class BeamSearch:
 
         all_new_scores = self.compute_new_scores(label_log_probs, is_last)
 
-        all_new_stack_depths = (
-                self.beam.stack_depths[:, None]
-                + self.stack_depth_change_by_id[None, :]
-        )
-
         if self.stack_depth_change_by_id_l2 is not None:
+            all_new_stack_depths = (
+                    self.beam.stack_depths[:, None]
+                    + self.stack_depth_change_by_id_l2[None, :]
+            )
             all_new_scores, all_new_stack_depths = self.extra_mask_layer(all_new_scores,
                                                                          all_new_stack_depths)
+        else:
+            all_new_stack_depths = (
+                    self.beam.stack_depths[:, None]
+                    + self.stack_depth_change_by_id[None, :]
+            )
 
         masked_scores = all_new_scores[None, :, :] + np.where(
             all_new_stack_depths[None, :, :]
