@@ -72,7 +72,7 @@ def initialize_tag_system(tagging_schema):
     elif tagging_schema == TD_SR:
         tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'))
     elif tagging_schema == TETRATAGGER:
-        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'))
+        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'), add_remove_top=True)
     else:
         logging.error("Please specify the tagging schema")
         return
@@ -236,7 +236,7 @@ def evaluate(args):
                                        num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
-                    args.model_name)
+                    args.model_name) #TODO: missing CRF transition matrix
 
 
 def main():

@@ -53,6 +53,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
                     model_name):
     predicted_dev_trees = []
     gold_dev_trees = []
+    c_err = 0
     for i in tq(range(predictions.shape[0])):
         logits = predictions[i]
         is_word = eval_labels[i] != 0
@@ -64,9 +65,11 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
             message = template.format(type(ex).__name__, ex.args)
             print(message)
         if tree.leaves() != original_tree.leaves():
+            c_err += 1
             continue
         predicted_dev_trees.append(tree)
         gold_dev_trees.append(original_tree)
+    logging.warning("Number of leaves mismatch: {}".format(c_err))
     save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
 
