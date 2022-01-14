@@ -35,6 +35,14 @@ class SRTagger(Tagger, ABC):
             return "s"
 
     @staticmethod
+    def create_shift_label(tag: str) -> str:
+        idx = tag.find("/")
+        if idx != -1:
+            return tag[idx + 1:].replace("/", "+") + "+"
+        else:
+            return ""
+
+    @staticmethod
     def create_reduce_tag(label: str) -> str:
         if label.find("|") != -1:  # drop extra node labels created after binarization
             return "r"
@@ -104,10 +112,12 @@ class SRTaggerBottomUp(SRTagger):
 
         if len(tags) == 1:  # base case
             assert tags[0].startswith('s')
-            return PTree(input_seq[0][1], [input_seq[0][0]])
+            prefix = self.create_shift_label(tags[0])
+            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
         for tag in tags:
             if tag.startswith('s'):
-                created_node_stack.append(PTree(input_seq[0][1], [input_seq[0][0]]))
+                prefix = self.create_shift_label(tag)
+                created_node_stack.append(PTree(prefix+input_seq[0][1], [input_seq[0][0]]))
                 input_seq.pop(0)
             else:
                 last_node = created_node_stack.pop()
@@ -205,7 +215,8 @@ class SRTaggerTopDown(SRTagger):
     def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
         if len(tags) == 1:  # base case
             assert tags[0].startswith('s')
-            return PTree(input_seq[0][1], [input_seq[0][0]])
+            prefix = self.create_shift_label(tags[0])
+            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
 
         assert tags[0].startswith('r')
         node = PTree(self._create_reduce_label(tags[0]), [])
@@ -214,7 +225,8 @@ class SRTaggerTopDown(SRTagger):
         for tag in tags[1:]:
             parent: PTree = created_node_stack[-1]
             if tag.startswith('s'):
-                new_node = PTree(input_seq[0][1], [input_seq[0][0]])
+                prefix = self.create_shift_label(tag)
+                new_node = PTree(prefix+input_seq[0][1], [input_seq[0][0]])
                 input_seq.pop(0)
             else:
                 label = self._create_reduce_label(tag)
