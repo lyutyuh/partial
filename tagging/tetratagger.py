@@ -12,8 +12,8 @@ from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class TetraTagger(Tagger, ABC):
-    def __init__(self, trees=None, add_remove_top=False):
-        super().__init__(trees, add_remove_top)
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+        super().__init__(trees, tag_vocab, add_remove_top)
 
         self.internal_tag_vocab_size = len(
             [tag for tag in self.tag_vocab if tag[0] in "LR"]

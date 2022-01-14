@@ -60,8 +60,8 @@ class SRTagger(Tagger, ABC):
 
 
 class SRTaggerBottomUp(SRTagger):
-    def __init__(self, trees=None, add_remove_top=False):
-        super().__init__(trees, add_remove_top)
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+        super().__init__(trees, tag_vocab, add_remove_top)
 
         stack_depth_change_by_id = [None] * len(self.tag_vocab)
         for i, tag in enumerate(self.tag_vocab):
@@ -159,8 +159,8 @@ class SRTaggerBottomUp(SRTagger):
 
 
 class SRTaggerTopDown(SRTagger):
-    def __init__(self, trees=None, add_remove_top=False):
-        super().__init__(trees, add_remove_top)
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+        super().__init__(trees, tag_vocab, add_remove_top)
 
         reduce_tag_vocab_size = len(
             [tag for tag in self.tag_vocab if tag[0].startswith('r')])
