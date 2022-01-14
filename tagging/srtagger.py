@@ -276,5 +276,5 @@ class SRTaggerTopDown(SRTagger):
                 beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)
             last_t = t
 
-        score, best_tag_ids = beam_search.get_path()
+        score, best_tag_ids = beam_search.get_path(required_stack_depth=0)
         return best_tag_ids
