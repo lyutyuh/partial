@@ -92,12 +92,16 @@ class TetraTagger(Tagger, ABC):
             return left_or_right
 
     @staticmethod
-    def _create_pre_terminal_label(tag: str) -> str:
+    def _create_pre_terminal_label(tag: str, default="X") -> str:
         idx = tag.find("/")
         if idx != -1:
-            return tag[idx + 1:].replace("/", "+")
+            label = tag[idx + 1:].replace("/", "+")
+            if default == "":
+                return label + "+"
+            else:
+                return label
         else:
-            return "X"
+            return default
 
     @staticmethod
     def _create_unary_reduce_label(tag: str) -> str:
@@ -225,7 +229,6 @@ class BottomUpTetratagger(TetraTagger):
                 logging.error("ERROR: Undefined stack state")
                 return
         logging.debug("=" * 20)
-
         return tags
 
     def _unary_reduce(self, node, last_node, tag):
@@ -252,10 +255,12 @@ class BottomUpTetratagger(TetraTagger):
         expanded_tags = self.expand_tags(tags)
         if len(expanded_tags) == 1:  # base case
             assert expanded_tags[0].startswith('l')
-            return PTree(input_seq[0][1], [input_seq[0][0]])
+            prefix = self._create_pre_terminal_label(expanded_tags[0], "")
+            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
         for tag in expanded_tags:
             if tag.startswith('l'):  # shift
-                created_node_stack.append(PTree(input_seq[0][1], [input_seq[0][0]]))
+                prefix = self._create_pre_terminal_label(tag, "")
+                created_node_stack.append(PTree(prefix+input_seq[0][1], [input_seq[0][0]]))
                 input_seq.pop(0)
             else:
                 node = PTree("X", [])
@@ -272,6 +277,13 @@ class BottomUpTetratagger(TetraTagger):
 
 
 class TopDownTetratagger(TetraTagger):
+
+    @staticmethod
+    def create_merge_shift_tag(label: str, left_or_right: str) -> str:
+        if label.find("+") != -1:
+            return left_or_right + "/" + "/".join(label.split("+")[:-1])
+        else:
+            return left_or_right
 
     def expand_tags(self, tags: [str]) -> [str]:
         new_tags = []
@@ -334,11 +346,13 @@ class TopDownTetratagger(TetraTagger):
         created_node_stack = [root]
         if len(expanded_tags) == 1:  # base case
             assert expanded_tags[0].startswith('r')
-            return PTree(input_seq[0][1], [input_seq[0][0]])
+            prefix = self._create_pre_terminal_label(expanded_tags[0], "")
+            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
         for tag in expanded_tags:
             if tag.startswith('r'):  # shift
                 node = created_node_stack.pop()
-                node.set_label(input_seq[0][1])
+                prefix = self._create_pre_terminal_label(tag, "")
+                node.set_label(prefix+input_seq[0][1])
                 node.insert(0, input_seq[0][0])
                 input_seq.pop(0)
             elif tag.startswith('R') or tag.startswith('L'):
