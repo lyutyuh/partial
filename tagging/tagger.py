@@ -15,7 +15,8 @@ class Tagger(ABC):
 
     def add_trees_to_vocab(self, trees: []) -> None:
         for tree in tq(trees):
-            for tag in self.tree_to_tags_pipeline(tree):
+            tags = self.tree_to_tags_pipeline(tree)
+            for tag in tags:
                 self.tag_vocab.add(tag)
         self.tag_vocab = sorted(self.tag_vocab)
 
@@ -49,7 +50,8 @@ class Tagger(ABC):
         ids = self.logits_to_ids(logits, mask)
         return self.ids_to_tree_pipeline(ids, leave_nodes)
 
-    def preprocess(self, tree: Tree) -> PTree:
+    def preprocess(self, original_tree: Tree) -> PTree:
+        tree = original_tree.copy(deep=True)
         if self.add_remove_top:
             cut_off_tree = tree[0]
         else:
