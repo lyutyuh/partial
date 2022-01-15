@@ -64,6 +64,7 @@ train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
 train.add_argument('--batch-size', type=int, default=16)
 train.add_argument('--num-warmup-steps', type=int, default=160)
+train.add_argument('--weight-decay', type=float, default=0.01)
 
 evaluate.add_argument('--model-name', type=str, required=True)
 evaluate.add_argument('--tag-vocab-path', type=str, default="data/")
@@ -167,13 +168,13 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path):
 
 
 def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epochs=4,
-                                       num_warmup_steps=160):
-    optimizer = AdamW(model.parameters(), lr=lr)
+                                       num_warmup_steps=160, weight_decay=0.01):
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     num_training_steps = num_epochs * len(train_dataloader)
     lr_scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=160,  # 160
+        num_warmup_steps=num_warmup_steps,
         num_training_steps=num_training_steps,
     )
     return optimizer, lr_scheduler, num_training_steps
@@ -202,7 +203,8 @@ def train(args):
                                                                                      train_dataloader,
                                                                                      args.lr,
                                                                                      args.epochs,
-                                                                                     args.num_warmup_steps)
+                                                                                     args.num_warmup_steps,
+                                                                                     args.weight_decay)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     if args.use_wandb:
         run_name = initialize_wandb(PROJECT, ENTITY,
