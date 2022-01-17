@@ -232,9 +232,24 @@ class TestSRTagger(unittest.TestCase):
         t2 = example_tree.copy(deep=True)
         td_tags = td_tagger.tree_to_tags_pipeline(t1)
         bu_tags = bu_tagger.tree_to_tags_pipeline(t2)
-        # self.assertEqual(set(td_tags), set(bu_tags))
+        self.assertEqual(set(td_tags), set(bu_tags))
         print(list(td_tags))
         print(list(bu_tags))
+
+    def test_bu_binarize(self):
+        READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('dev')
+        tagger = SRTaggerBottomUp(add_remove_top=True)
+        for tree in tq(trees):
+            tags = tagger.tree_to_tags_pipeline(tree)
+            for idx, tag in enumerate(tags):
+                if tag.startswith("rr"):
+                    if (idx + 1) < len(tags):
+                        self.assertTrue(tags[idx + 1].startswith('r'))
+                elif tag.startswith("r"):
+                    if (idx + 1) < len(tags):
+                        self.assertTrue(tags[idx + 1].startswith('s'))
+
 
     def test_td_bu(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
