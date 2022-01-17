@@ -252,6 +252,7 @@ def evaluate(args):
 
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
+    model.to(device)
     if tagging_schema == TETRATAGGER:
         num_leaf_labels = tag_system.leaf_tag_vocab_size
         num_tags = len(tag_system.tag_vocab)
