@@ -225,27 +225,32 @@ def train(args):
             lr_scheduler.step()
             optimizer.zero_grad()
 
-    torch.save(model, args.output_path + run_name)
+    torch.save(model.state_dict(), args.output_path + run_name)
 
 
-def get_tagging_schema_from_model_name(model_name):
-    tagging_schema = model_name.split("-")[0]
-    if tagging_schema == "td" or tagging_schema == "bu":
-        return tagging_schema + "-sr"
+def decode_model_name(model_name):
+    name_chunks = model_name.split("-")
+    if name_chunks[0] == "td" or name_chunks[0] == "bu":
+        tagging_schema = name_chunks[0] + "-" + name_chunks[1]
+        model_type = name_chunks[2]
     else:
-        return tagging_schema
+        tagging_schema = name_chunks[0]
+        model_type = name_chunks[2]
+    return tagging_schema, model_type
 
 
 def evaluate(args):
     if args.use_wandb:
         wandb.init(project=PROJECT, entity=ENTITY, resume=True)
-    tagging_schema = get_tagging_schema_from_model_name(args.model_name)
+    tagging_schema, model_type = decode_model_name(args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
     _, eval_dataset, _, eval_dataloader = prepare_training_data(
         tag_system, tagging_schema, args.batch_size)
-    model = torch.load(args.model_path + args.model_name)
+
+    model = initialize_model(model_type, tagging_schema, tag_system, args.model_path)
+    model.load_state_dict(torch.load(args.model_path + args.model_name))
     if tagging_schema == TETRATAGGER:
         num_leaf_labels = tag_system.leaf_tag_vocab_size
         num_tags = len(tag_system.tag_vocab)
