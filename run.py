@@ -69,6 +69,7 @@ train.add_argument('--weight-decay', type=float, default=0.01)
 evaluate.add_argument('--model-name', type=str, required=True)
 evaluate.add_argument('--tag-vocab-path', type=str, default="data/")
 evaluate.add_argument('--model-path', type=str, default='pat-models/')
+evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
 evaluate.add_argument('--use-wandb', type=bool, default=True,
@@ -249,7 +250,7 @@ def evaluate(args):
     _, eval_dataset, _, eval_dataloader = prepare_training_data(
         tag_system, tagging_schema, args.batch_size)
 
-    model = initialize_model(model_type, tagging_schema, tag_system, args.model_path)
+    model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     if tagging_schema == TETRATAGGER:
         num_leaf_labels = tag_system.leaf_tag_vocab_size
