@@ -43,11 +43,12 @@ class SRTagger(Tagger, ABC):
             return ""
 
     @staticmethod
-    def create_reduce_tag(label: str) -> str:
+    def create_reduce_tag(label: str, is_right_child=False) -> str:
         if label.find("|") != -1:  # drop extra node labels created after binarization
-            return "r"
+            tag = "r"
         else:
-            return "r" + "/" + label.replace("+", "/")
+            tag = "r" + "/" + label.replace("+", "/")
+        return "r" + tag if is_right_child else tag
 
     @staticmethod
     def _create_reduce_label(tag: str) -> str:
@@ -96,7 +97,8 @@ class SRTaggerBottomUp(SRTagger):
                 logging.debug("REDUCE[ {0} {1} --> {2} ]".format(
                     *(prev_node.label(), node.label(), node.parent().label())))
 
-                tags.append(self.create_reduce_tag(node.parent().label()))
+                parent_is_right = node.parent().left_sibling() is not None
+                tags.append(self.create_reduce_tag(node.parent().label(), parent_is_right))
                 stack.pop()
                 stack.pop()
                 stack.append(node.parent())
