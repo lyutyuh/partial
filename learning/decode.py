@@ -21,14 +21,12 @@ class BeamSearch:
             min_depth=1,
             keep_per_depth=1,
             stack_depth_change_by_id_l2=None,
-            stack_depth_change_by_id_after=None,
             crf_transitions=None,
             initial_label=None,
     ):
         # Save parameters
         self.stack_depth_change_by_id = stack_depth_change_by_id
         self.stack_depth_change_by_id_l2 = stack_depth_change_by_id_l2
-        self.stack_depth_change_by_id_after = stack_depth_change_by_id_after
         self.valid_depths = np.arange(min_depth, max_depth)
         self.keep_per_depth = keep_per_depth
         self.max_depth = max_depth
@@ -70,16 +68,6 @@ class BeamSearch:
         )
         return all_new_scores, all_new_stack_depths
 
-    def after_mask(self, all_new_scores, all_new_stack_depths):
-        after_stack_depths = (
-                all_new_stack_depths
-                + self.stack_depth_change_by_id_after
-        )
-        depth_mask = np.zeros(all_new_stack_depths.shape)
-        depth_mask[after_stack_depths < 1] = -np.inf
-        all_new_scores = all_new_scores + depth_mask
-        return all_new_scores
-
     def advance(self, label_logits, is_last=False):
         label_log_probs = label_logits
 
@@ -97,9 +85,6 @@ class BeamSearch:
                     self.beam.stack_depths[:, None]
                     + self.stack_depth_change_by_id[None, :]
             )
-
-        if self.stack_depth_change_by_id_after is not None:
-            all_new_scores = self.after_mask(all_new_scores, all_new_stack_depths)
 
         masked_scores = all_new_scores[None, :, :] + np.where(
             all_new_stack_depths[None, :, :]
