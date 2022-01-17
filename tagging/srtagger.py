@@ -65,14 +65,22 @@ class SRTaggerBottomUp(SRTagger):
         super().__init__(trees, tag_vocab, add_remove_top)
 
         stack_depth_change_by_id = [None] * len(self.tag_vocab)
+        stack_depth_change_by_id_after = [None] * len(self.tag_vocab)
         for i, tag in enumerate(self.tag_vocab):
             if tag.startswith("s"):
                 stack_depth_change_by_id[i] = +1
+                stack_depth_change_by_id_after[i] = 0
+            elif tag.startswith("rr"):
+                stack_depth_change_by_id[i] = -1
+                stack_depth_change_by_id_after[i] = -1
             elif tag.startswith("r"):
                 stack_depth_change_by_id[i] = -1
+                stack_depth_change_by_id_after[i] = 0
         assert None not in stack_depth_change_by_id
         self._stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=int)
+        self._stack_depth_change_by_id_after = np.array(
+            stack_depth_change_by_id_after, dtype=int)
 
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
@@ -135,6 +143,7 @@ class SRTaggerBottomUp(SRTagger):
         beam_search = BeamSearch(
             initial_stack_depth=0,
             stack_depth_change_by_id=self._stack_depth_change_by_id,
+            stack_depth_change_by_id_after=self._stack_depth_change_by_id_after,
             crf_transitions=crf_transitions,
             max_depth=12,
             keep_per_depth=1,
