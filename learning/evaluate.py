@@ -64,6 +64,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
             print(message)
+            continue
         if tree.leaves() != original_tree.leaves():
             c_err += 1
             continue
