@@ -57,7 +57,7 @@ train.add_argument('--model-path', type=str, default='distilbert',
                    help="Bert model path or name")
 train.add_argument('--output-path', type=str, default='pat-models/',
                    help="Path to save trained models")
-train.add_argument('--use-wandb', type=bool, default=True,
+train.add_argument('--use-wandb', type=bool, default=False,
                    help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
 train.add_argument('--lr', type=float, default=5e-5)
@@ -72,7 +72,7 @@ evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
-evaluate.add_argument('--use-wandb', type=bool, default=True,
+evaluate.add_argument('--use-wandb', type=bool, default=False,
                    help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
 
