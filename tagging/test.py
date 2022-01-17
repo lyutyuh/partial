@@ -209,8 +209,8 @@ class TestPipeline(unittest.TestCase):
 class TestSRTagger(unittest.TestCase):
     def test_tag_sequence_example(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
-        trees = READER.parsed_sents('dev')
-        tagger = SRTaggerTopDown(add_remove_top=True)
+        trees = READER.parsed_sents('train')
+        tagger = SRTaggerBottomUp(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)
@@ -225,24 +225,36 @@ class TestSRTagger(unittest.TestCase):
         import nltk
         example_tree = nltk.Tree.fromstring(
             "(TOP (S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .)))")
+        example_tree.pretty_print()
         td_tagger = SRTaggerTopDown(add_remove_top=True)
         bu_tagger = SRTaggerBottomUp(add_remove_top=True)
         t1 = example_tree.copy(deep=True)
         t2 = example_tree.copy(deep=True)
         td_tags = td_tagger.tree_to_tags_pipeline(t1)
         bu_tags = bu_tagger.tree_to_tags_pipeline(t2)
+        self.assertEqual(set(td_tags), set(bu_tags))
         print(list(td_tags))
         print(list(bu_tags))
+
+    def test_td_bu(self):
+        READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('dev')
+        td_tagger = SRTaggerTopDown(add_remove_top=True)
+        bu_tagger = SRTaggerBottomUp(add_remove_top=True)
+
+        for tree in tq(trees):
+            td_tags = td_tagger.tree_to_tags_pipeline(tree)
+            bu_tags = bu_tagger.tree_to_tags_pipeline(tree)
+            self.assertEqual(set(td_tags), set(bu_tags))
 
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
         trees = READER.parsed_sents('dev')
-        tagger = SRTaggerTopDown(READER.parsed_sents('train'), add_remove_top=True)
+        tagger = SRTaggerBottomUp(READER.parsed_sents('train'), add_remove_top=True)
         for tree in tq(trees):
-            original_tree = tree.copy(deep=True)
             ids = tagger.tree_to_ids_pipeline(tree)
             tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
-            self.assertEqual(original_tree, tree_back)
+            self.assertEqual(tree, tree_back)
 
     def test_max_length(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
