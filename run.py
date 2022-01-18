@@ -14,7 +14,7 @@ from learning.dataset import TaggingDataset
 from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
-from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy
+from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -214,6 +214,7 @@ def train(args):
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
+    idx = 0
     for _ in tq(range(args.epochs)):
         for batch in tq(train_dataloader):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -223,9 +224,13 @@ def train(args):
             if args.use_wandb:
                 wandb.log({"loss": loss})
 
+            if idx % 50 == 0:
+                report_eval_loss(model, eval_dataloader, device, args.use_wandb)
+
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
+            idx += 1
 
     torch.save(model.state_dict(), args.output_path + run_name)
 
