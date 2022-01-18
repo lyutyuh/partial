@@ -8,6 +8,8 @@ from tqdm import tqdm as tq
 class TagDecodeModerator(ABC):
     def __init__(self, tag_vocab):
         self.vocab_len = len(tag_vocab)
+        self.stack_depth_change_by_id = None
+        self.stack_depth_change_by_id_l2 = None
 
 
 class Tagger(ABC):
