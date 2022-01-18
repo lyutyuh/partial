@@ -5,6 +5,11 @@ from nltk import Tree
 from tqdm import tqdm as tq
 
 
+class TagDecodeModerator(ABC):
+    def __init__(self, tag_vocab):
+        self.vocab_len = len(tag_vocab)
+
+
 class Tagger(ABC):
     def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
         self.tag_vocab = set()
@@ -14,6 +19,8 @@ class Tagger(ABC):
             self.tag_vocab = tag_vocab
         elif trees is not None:
             self.add_trees_to_vocab(trees)
+
+        self.decode_moderator = None
 
     def add_trees_to_vocab(self, trees: []) -> None:
         for tree in tq(trees):

@@ -250,6 +250,20 @@ class TestSRTagger(unittest.TestCase):
                     if (idx + 1) < len(tags):
                         self.assertTrue(tags[idx + 1].startswith('s'))
 
+    def test_td_binarize(self):
+        READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
+        trees = READER.parsed_sents('dev')
+        tagger = SRTaggerTopDown(add_remove_top=True)
+        for tree in tq(trees):
+            tags = tagger.tree_to_tags_pipeline(tree)
+            for idx, tag in enumerate(tags):
+                if tag.startswith("s"):
+                    if (idx + 1) < len(tags):
+                        self.assertTrue(tags[idx + 1].startswith('rr') or tags[idx + 1].startswith('s'))
+                elif tag.startswith("r"):
+                    if (idx + 1) < len(tags):
+                        self.assertTrue(not tags[idx + 1].startswith('rr'))
+
 
     def test_td_bu(self):
         READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
