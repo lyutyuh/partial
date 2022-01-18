@@ -254,7 +254,7 @@ def evaluate(args):
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
     if tagging_schema == TETRATAGGER:
-        num_leaf_labels = tag_system.leaf_tag_vocab_size
+        num_leaf_labels = tag_system.decode_moderator.leaf_tag_vocab_size
         num_tags = len(tag_system.tag_vocab)
     else:
         num_leaf_labels = len(tag_system.tag_vocab)
