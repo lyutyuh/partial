@@ -82,9 +82,9 @@ class TaggingDataset(torch.utils.data.Dataset):
 
         odd_labels = tag_ids[1::2]
         if self.is_tetratags:
-            even_labels = tag_ids[::2] - self.tag_system.internal_tag_vocab_size
+            even_labels = tag_ids[::2] - self.tag_system.decode_moderator.internal_tag_vocab_size
             labels[word_end_positions] = (
-                    odd_labels * (self.tag_system.leaf_tag_vocab_size + 1) + even_labels)
+                    odd_labels * (self.tag_system.decode_moderator.leaf_tag_vocab_size + 1) + even_labels)
         else:
             even_labels = tag_ids[::2]
             labels[word_end_positions] = (
