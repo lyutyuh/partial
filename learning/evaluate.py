@@ -50,7 +50,7 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, use_wandb):
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,
-                    model_name):
+                    model_name, max_depth):
     predicted_dev_trees = []
     gold_dev_trees = []
     c_err = 0
@@ -59,18 +59,19 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
         is_word = eval_labels[i] != 0
         original_tree = eval_dataset.trees[i]
         try:  # ignore the ones that failed in unchomsky_normal_form
-            tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word)
+            tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word, max_depth=max_depth)
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
             print(message)
+            c_err += 1
             continue
         if tree.leaves() != original_tree.leaves():
             c_err += 1
             continue
         predicted_dev_trees.append(tree)
         gold_dev_trees.append(original_tree)
-    logging.warning("Number of leaves mismatch: {}".format(c_err))
+    logging.warning("Number of binarization error: {}".format(c_err))
     save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
 
