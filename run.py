@@ -224,7 +224,7 @@ def train(args):
             if args.use_wandb:
                 wandb.log({"loss": loss})
 
-            if idx % 50 == 0:
+            if idx % 100 == 0:
                 report_eval_loss(model, eval_dataloader, device, args.use_wandb)
 
             optimizer.step()
