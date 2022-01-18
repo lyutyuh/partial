@@ -6,20 +6,19 @@ from nltk import ParentedTree as PTree
 from nltk import Tree
 
 from learning.decode import BeamSearch
-from tagging.tagger import Tagger
+from tagging.tagger import Tagger, TagDecodeModerator
 from tagging.transform import LeftCornerTransformer, RightCornerTransformer
 from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
-class TetraTagger(Tagger, ABC):
-    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
-        super().__init__(trees, tag_vocab, add_remove_top)
-
+class TetraTagDecodeModerator(TagDecodeModerator):
+    def __init__(self, tag_vocab):
+        super().__init__(tag_vocab)
         self.internal_tag_vocab_size = len(
-            [tag for tag in self.tag_vocab if tag[0] in "LR"]
+            [tag for tag in tag_vocab if tag[0] in "LR"]
         )
         self.leaf_tag_vocab_size = len(
-            [tag for tag in self.tag_vocab if tag[0] in "lr"]
+            [tag for tag in tag_vocab if tag[0] in "lr"]
         )
 
         is_leaf_mask = np.concatenate(
@@ -28,13 +27,13 @@ class TetraTagger(Tagger, ABC):
                 np.ones(self.leaf_tag_vocab_size),
             ]
         )
-        self._internal_tags_only = np.asarray(-1e9 * is_leaf_mask, dtype=float)
-        self._leaf_tags_only = np.asarray(
+        self.internal_tags_only = np.asarray(-1e9 * is_leaf_mask, dtype=float)
+        self.leaf_tags_only = np.asarray(
             -1e9 * (1 - is_leaf_mask), dtype=float
         )
 
-        stack_depth_change_by_id = [None] * len(self.tag_vocab)
-        for i, tag in enumerate(self.tag_vocab):
+        stack_depth_change_by_id = [None] * len(tag_vocab)
+        for i, tag in enumerate(tag_vocab):
             if tag.startswith("l"):
                 stack_depth_change_by_id[i] = +1
             elif tag.startswith("R"):
@@ -42,9 +41,16 @@ class TetraTagger(Tagger, ABC):
             else:
                 stack_depth_change_by_id[i] = 0
         assert None not in stack_depth_change_by_id
-        self._stack_depth_change_by_id = np.array(
+        self.stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=np.int32
         )
+        self.mask_binarize = False
+
+
+class TetraTagger(Tagger, ABC):
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+        super().__init__(trees, tag_vocab, add_remove_top)
+        self.decode_moderator = TetraTagDecodeModerator(self.tag_vocab)
 
     def expand_tags(self, tags: [str]) -> [str]:
         raise NotImplementedError("expand tags is not implemented")
@@ -134,8 +140,8 @@ class TetraTagger(Tagger, ABC):
 
     def logits_to_ids(self, logits: [], mask) -> [int]:
         beam_search = BeamSearch(
+            self.decode_moderator,
             initial_stack_depth=0,
-            stack_depth_change_by_id=self._stack_depth_change_by_id,
             max_depth=12,
             keep_per_depth=1,
         )
@@ -146,9 +152,9 @@ class TetraTagger(Tagger, ABC):
                 continue
             if last_t is not None:
                 beam_search.advance(
-                    logits[last_t, :] + self._internal_tags_only
+                    logits[last_t, :] + self.decode_moderator.internal_tags_only
                 )
-            beam_search.advance(logits[t, :] + self._leaf_tags_only)
+            beam_search.advance(logits[t, :] + self.decode_moderator.leaf_tags_only)
             last_t = t
 
         score, best_tag_ids = beam_search.get_path()
@@ -256,11 +262,11 @@ class BottomUpTetratagger(TetraTagger):
         if len(expanded_tags) == 1:  # base case
             assert expanded_tags[0].startswith('l')
             prefix = self._create_pre_terminal_label(expanded_tags[0], "")
-            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
+            return PTree(prefix + input_seq[0][1], [input_seq[0][0]])
         for tag in expanded_tags:
             if tag.startswith('l'):  # shift
                 prefix = self._create_pre_terminal_label(tag, "")
-                created_node_stack.append(PTree(prefix+input_seq[0][1], [input_seq[0][0]]))
+                created_node_stack.append(PTree(prefix + input_seq[0][1], [input_seq[0][0]]))
                 input_seq.pop(0)
             else:
                 node = PTree("X", [])
@@ -347,12 +353,12 @@ class TopDownTetratagger(TetraTagger):
         if len(expanded_tags) == 1:  # base case
             assert expanded_tags[0].startswith('r')
             prefix = self._create_pre_terminal_label(expanded_tags[0], "")
-            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
+            return PTree(prefix + input_seq[0][1], [input_seq[0][0]])
         for tag in expanded_tags:
             if tag.startswith('r'):  # shift
                 node = created_node_stack.pop()
                 prefix = self._create_pre_terminal_label(tag, "")
-                node.set_label(prefix+input_seq[0][1])
+                node.set_label(prefix + input_seq[0][1])
                 node.insert(0, input_seq[0][0])
                 input_seq.pop(0)
             elif tag.startswith('R') or tag.startswith('L'):

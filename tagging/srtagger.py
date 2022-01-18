@@ -5,7 +5,7 @@ from nltk import ParentedTree as PTree
 from tqdm import tqdm as tq
 
 from learning.decode import BeamSearch
-from tagging.tagger import Tagger
+from tagging.tagger import Tagger, TagDecodeModerator
 from tagging.transform import LeftCornerTransformer
 
 import numpy as np
@@ -13,7 +13,96 @@ import numpy as np
 from tagging.tree_tools import find_node_type, NodeType
 
 
+class SRTagDecodeModerator(TagDecodeModerator, ABC):
+    def __init__(self, tag_vocab):
+        super().__init__(tag_vocab)
+        self.reduce_tag_size = len([tag for tag in tag_vocab if tag.startswith("r")])
+        self.shift_tag_size = len([tag for tag in tag_vocab if tag.startswith("s")])
+        self.rr_tag_size = len([tag for tag in tag_vocab if tag.startswith("rr")])
+        self.lr_tag_size = self.reduce_tag_size - self.rr_tag_size
+        self.mask_binarize = True
+
+    def mask_scores_for_binarization(self, labels, scores) -> []:
+        raise NotImplementedError
+
+class BUSRTagDecodeModerator(SRTagDecodeModerator):
+    def __init__(self, tag_vocab):
+        super().__init__(tag_vocab)
+        stack_depth_change_by_id = [None] * len(tag_vocab)
+        for i, tag in enumerate(tag_vocab):
+            if tag.startswith("s"):
+                stack_depth_change_by_id[i] = +1
+            elif tag.startswith("rr"):
+                stack_depth_change_by_id[i] = -1
+            elif tag.startswith("r"):
+                stack_depth_change_by_id[i] = -1
+        assert None not in stack_depth_change_by_id
+        self.stack_depth_change_by_id = np.array(
+            stack_depth_change_by_id, dtype=int)
+
+        self.reduce_only_mask = np.full((len(tag_vocab),), -np.inf)
+        self.shift_only_mask = np.full((len(tag_vocab),), -np.inf)
+        self.reduce_only_mask[:self.reduce_tag_size] = 0.0
+        self.shift_only_mask[-self.shift_tag_size:] = 0.0
+
+    def mask_scores_for_binarization(self, labels, scores) -> []:
+        # after rr -> only reduce, after lr -> only shift
+        mask1 = np.where(
+            (labels[:, None] >= self.lr_tag_size) & (labels[:, None] < self.reduce_tag_size),
+            self.reduce_only_mask, 0.0)
+        mask2 = np.where(labels[:, None] < self.lr_tag_size, self.shift_only_mask, 0.0)
+        all_new_scores = scores + mask1 + mask2
+        return all_new_scores
+
+
+class TDSRTagDecodeModerator(SRTagDecodeModerator):
+    def __init__(self, tag_vocab):
+        super().__init__(tag_vocab)
+        is_shift_mask = np.concatenate(
+            [
+                np.zeros(self.reduce_tag_size),
+                np.ones(self.shift_tag_size),
+            ]
+        )
+        self.reduce_tags_only = np.asarray(-1e9 * is_shift_mask, dtype=float)
+
+        stack_depth_change_by_id = [None] * len(tag_vocab)
+        stack_depth_change_by_id_l2 = [None] * len(tag_vocab)
+        for i, tag in enumerate(tag_vocab):
+            if tag.startswith("s"):
+                stack_depth_change_by_id_l2[i] = 0
+                stack_depth_change_by_id[i] = -1
+            elif tag.startswith("r"):
+                stack_depth_change_by_id_l2[i] = -1
+                stack_depth_change_by_id[i] = +2
+        assert None not in stack_depth_change_by_id
+        assert None not in stack_depth_change_by_id_l2
+        self.stack_depth_change_by_id = np.array(
+            stack_depth_change_by_id, dtype=int)
+        self.stack_depth_change_by_id_l2 = np.array(
+            stack_depth_change_by_id_l2, dtype=int)
+        self._initialize_binarize_mask(tag_vocab)
+
+    def _initialize_binarize_mask(self, tag_vocab) -> None:
+        self.not_rr_mask = np.full((len(tag_vocab),), -np.inf)
+        self.not_lr_mask = np.full((len(tag_vocab),), -np.inf)
+        self.not_rr_mask[-self.shift_tag_size:] = 0.0
+        self.not_rr_mask[:self.lr_tag_size] = 0.0
+        self.not_lr_mask[self.lr_tag_size:] = 0.0
+
+    def mask_scores_for_binarization(self, labels, scores) -> []:
+        # before rr -> only shift, before lr -> only reduce
+        # so: if shift -> not lr and if reduce -> not rr
+        mask1 = np.where(labels[:, None] >= self.reduce_tag_size, self.not_lr_mask, 0.0)
+        mask2 = np.where(labels[:, None] < self.reduce_tag_size, self.not_rr_mask, 0.0)
+        all_new_scores = scores + mask1 + mask2
+        return all_new_scores
+
+
 class SRTagger(Tagger, ABC):
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+        super().__init__(trees, tag_vocab, add_remove_top)
+
     def add_trees_to_vocab(self, trees: []) -> None:
         self.label_vocab = set()
         for tree in tq(trees):
@@ -63,18 +152,7 @@ class SRTagger(Tagger, ABC):
 class SRTaggerBottomUp(SRTagger):
     def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
         super().__init__(trees, tag_vocab, add_remove_top)
-
-        stack_depth_change_by_id = [None] * len(self.tag_vocab)
-        for i, tag in enumerate(self.tag_vocab):
-            if tag.startswith("s"):
-                stack_depth_change_by_id[i] = +1
-            elif tag.startswith("rr"):
-                stack_depth_change_by_id[i] = -1
-            elif tag.startswith("r"):
-                stack_depth_change_by_id[i] = -1
-        assert None not in stack_depth_change_by_id
-        self._stack_depth_change_by_id = np.array(
-            stack_depth_change_by_id, dtype=int)
+        self.decode_moderator = BUSRTagDecodeModerator(self.tag_vocab)
 
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
@@ -117,11 +195,11 @@ class SRTaggerBottomUp(SRTagger):
         if len(tags) == 1:  # base case
             assert tags[0].startswith('s')
             prefix = self.create_shift_label(tags[0])
-            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
+            return PTree(prefix + input_seq[0][1], [input_seq[0][0]])
         for tag in tags:
             if tag.startswith('s'):
                 prefix = self.create_shift_label(tag)
-                created_node_stack.append(PTree(prefix+input_seq[0][1], [input_seq[0][0]]))
+                created_node_stack.append(PTree(prefix + input_seq[0][1], [input_seq[0][0]]))
                 input_seq.pop(0)
             else:
                 last_node = created_node_stack.pop()
@@ -135,8 +213,8 @@ class SRTaggerBottomUp(SRTagger):
 
     def logits_to_ids(self, logits: [], mask, crf_transitions=None) -> [int]:
         beam_search = BeamSearch(
+            self.decode_moderator,
             initial_stack_depth=0,
-            stack_depth_change_by_id=self._stack_depth_change_by_id,
             crf_transitions=crf_transitions,
             max_depth=12,
             keep_per_depth=1,
@@ -165,34 +243,7 @@ class SRTaggerBottomUp(SRTagger):
 class SRTaggerTopDown(SRTagger):
     def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
         super().__init__(trees, tag_vocab, add_remove_top)
-
-        reduce_tag_vocab_size = len(
-            [tag for tag in self.tag_vocab if tag[0].startswith('r')])
-        shift_tag_vocab_size = len(
-            [tag for tag in self.tag_vocab if tag[0].startswith('s')])
-        is_shift_mask = np.concatenate(
-            [
-                np.zeros(reduce_tag_vocab_size),
-                np.ones(shift_tag_vocab_size),
-            ]
-        )
-        self._reduce_tags_only = np.asarray(-1e9 * is_shift_mask, dtype=float)
-
-        stack_depth_change_by_id = [None] * len(self.tag_vocab)
-        stack_depth_change_by_id_l2 = [None] * len(self.tag_vocab)
-        for i, tag in enumerate(self.tag_vocab):
-            if tag.startswith("s"):
-                stack_depth_change_by_id_l2[i] = 0
-                stack_depth_change_by_id[i] = -1
-            elif tag.startswith("r"):
-                stack_depth_change_by_id_l2[i] = -1
-                stack_depth_change_by_id[i] = +2
-        assert None not in stack_depth_change_by_id
-        assert None not in stack_depth_change_by_id_l2
-        self._stack_depth_change_by_id = np.array(
-            stack_depth_change_by_id, dtype=int)
-        self._stack_depth_change_by_id_l2 = np.array(
-            stack_depth_change_by_id_l2, dtype=int)
+        self.decode_moderator = TDSRTagDecodeModerator(self.tag_vocab)
 
     def tree_to_tags(self, root: PTree) -> [str]:
         stack: [PTree] = [root]
@@ -221,7 +272,7 @@ class SRTaggerTopDown(SRTagger):
         if len(tags) == 1:  # base case
             assert tags[0].startswith('s')
             prefix = self.create_shift_label(tags[0])
-            return PTree(prefix+input_seq[0][1], [input_seq[0][0]])
+            return PTree(prefix + input_seq[0][1], [input_seq[0][0]])
 
         assert tags[0].startswith('r')
         node = PTree(self._create_reduce_label(tags[0]), [])
@@ -231,7 +282,7 @@ class SRTaggerTopDown(SRTagger):
             parent: PTree = created_node_stack[-1]
             if tag.startswith('s'):
                 prefix = self.create_shift_label(tag)
-                new_node = PTree(prefix+input_seq[0][1], [input_seq[0][0]])
+                new_node = PTree(prefix + input_seq[0][1], [input_seq[0][0]])
                 input_seq.pop(0)
             else:
                 label = self._create_reduce_label(tag)
@@ -252,9 +303,8 @@ class SRTaggerTopDown(SRTagger):
 
     def logits_to_ids(self, logits: [], mask, crf_transitions=None) -> [int]:
         beam_search = BeamSearch(
+            self.decode_moderator,
             initial_stack_depth=1,
-            stack_depth_change_by_id=self._stack_depth_change_by_id,
-            stack_depth_change_by_id_l2=self._stack_depth_change_by_id_l2,
             crf_transitions=crf_transitions,
             max_depth=12,
             min_depth=0,
@@ -275,7 +325,7 @@ class SRTaggerTopDown(SRTagger):
             if idx == seq_len:
                 is_last = True
             if last_t is None:
-                beam_search.advance(logits[t, -len(self.tag_vocab):] + self._reduce_tags_only,
+                beam_search.advance(logits[t, -len(self.tag_vocab):] + self.decode_moderator.reduce_tags_only,
                                     is_last=is_last)
             else:
                 beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)

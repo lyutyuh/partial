@@ -15,18 +15,16 @@ class Beam:
 class BeamSearch:
     def __init__(
             self,
+            tag_moderator,
             initial_stack_depth,
-            stack_depth_change_by_id,
             max_depth=12,
             min_depth=1,
             keep_per_depth=1,
-            stack_depth_change_by_id_l2=None,
             crf_transitions=None,
             initial_label=None,
     ):
         # Save parameters
-        self.stack_depth_change_by_id = stack_depth_change_by_id
-        self.stack_depth_change_by_id_l2 = stack_depth_change_by_id_l2
+        self.tag_moderator = tag_moderator
         self.valid_depths = np.arange(min_depth, max_depth)
         self.keep_per_depth = keep_per_depth
         self.max_depth = max_depth
@@ -64,7 +62,7 @@ class BeamSearch:
 
         all_new_stack_depths = (
                 all_new_stack_depths
-                + self.stack_depth_change_by_id
+                + self.tag_moderator.stack_depth_change_by_id
         )
         return all_new_scores, all_new_stack_depths
 
@@ -72,18 +70,21 @@ class BeamSearch:
         label_log_probs = label_logits
 
         all_new_scores = self.compute_new_scores(label_log_probs, is_last)
+        if self.tag_moderator.mask_binarize and self.beam.labels is not None:
+            labels = self.beam.labels
+            all_new_scores = self.tag_moderator.mask_scores_for_binarization(labels, all_new_scores)
 
-        if self.stack_depth_change_by_id_l2 is not None:
+        if self.tag_moderator.stack_depth_change_by_id_l2 is not None:
             all_new_stack_depths = (
                     self.beam.stack_depths[:, None]
-                    + self.stack_depth_change_by_id_l2[None, :]
+                    + self.tag_moderator.stack_depth_change_by_id_l2[None, :]
             )
             all_new_scores, all_new_stack_depths = self.extra_mask_layer(all_new_scores,
                                                                          all_new_stack_depths)
         else:
             all_new_stack_depths = (
                     self.beam.stack_depths[:, None]
-                    + self.stack_depth_change_by_id[None, :]
+                    + self.tag_moderator.stack_depth_change_by_id[None, :]
             )
 
         masked_scores = all_new_scores[None, :, :] + np.where(
