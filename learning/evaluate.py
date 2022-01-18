@@ -6,6 +6,17 @@ import logging
 import wandb
 
 
+def report_eval_loss(model, eval_dataloader, device, use_wandb):
+    model.eval()
+    for batch in tq(eval_dataloader):
+        batch = {k: v.to(device) for k, v in batch.items()}
+        outputs = model(**batch)
+        loss = outputs[0]
+        logging.info("Eval Loss: {}".format(loss))
+        if use_wandb:
+            wandb.log({"eval_loss": loss})
+
+
 def predict(model, eval_dataloader, dataset_size, num_tags, device):
     model.eval()
     predictions = np.zeros((dataset_size, 256, num_tags))
