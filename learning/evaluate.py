@@ -12,7 +12,7 @@ def report_eval_loss(model, eval_dataloader, device, use_wandb):
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
-            loss.append(outputs[0])
+            loss.append(outputs[0].cpu())
 
     mean_loss = np.mean(loss)
     logging.info("Eval Loss: {}".format(mean_loss))

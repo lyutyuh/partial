@@ -135,8 +135,8 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
             label2id={label: i for i, label in enumerate(tag_system.tag_vocab)},
             task_specific_params={
                 'model_path': model_path,
-                'num_even_tags': tag_system.leaf_tag_vocab_size,
-                'num_odd_tags': tag_system.internal_tag_vocab_size,
+                'num_even_tags': tag_system.decode_moderator.leaf_tag_vocab_size,
+                'num_odd_tags': tag_system.decode_moderator.internal_tag_vocab_size,
             }
         )
     elif model_type == BERT and tagging_schema != TETRATAGGER:
