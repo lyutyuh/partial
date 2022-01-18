@@ -72,6 +72,7 @@ evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
+evaluate.add_argument('--max-depth', type=int, default=12, help="Max stack depth used for decoding")
 evaluate.add_argument('--use-wandb', type=bool, default=False,
                    help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
 
@@ -263,7 +264,7 @@ def evaluate(args):
                                        num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
-                    args.model_name) #TODO: missing CRF transition matrix
+                    args.model_name, args.max_depth) #TODO: missing CRF transition matrix
 
 
 def main():

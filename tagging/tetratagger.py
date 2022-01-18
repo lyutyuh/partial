@@ -138,11 +138,11 @@ class TetraTagger(Tagger, ABC):
             prev_state = state
         return True
 
-    def logits_to_ids(self, logits: [], mask) -> [int]:
+    def logits_to_ids(self, logits: [], mask, max_depth) -> [int]:
         beam_search = BeamSearch(
             self.decode_moderator,
             initial_stack_depth=0,
-            max_depth=12,
+            max_depth=max_depth,
             keep_per_depth=1,
         )
 
