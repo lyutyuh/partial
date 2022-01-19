@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm as tq
 from transformers import AdamW
 
-import wandb
 from learning.dataset import TaggingDataset
 from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
@@ -213,7 +212,7 @@ def train(args):
             if args.use_tensorboard:
                 writer.add_scalar('Loss/train', loss, n_iter)
 
-            if n_iter % 100 == 0:
+            if n_iter % 2000 == 1:
                 report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
             optimizer.step()
