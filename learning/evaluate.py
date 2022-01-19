@@ -3,7 +3,6 @@ import numpy as np
 from tqdm import tqdm as tq
 
 import logging
-import wandb
 
 
 def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
@@ -18,6 +17,7 @@ def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
     logging.info("Eval Loss: {}".format(mean_loss))
     if writer is not None:
         writer.add_scalar('eval_loss', mean_loss, n_iter)
+    return mean_loss
 
 
 def predict(model, eval_dataloader, dataset_size, num_tags, device):
@@ -62,6 +62,7 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_ten
     if use_tensorboard:
         writer.add_pr_curve('odd_tags_pr_curve', odd_labels, odd_predictions, 0)
         writer.add_pr_curve('even_tags_pr_curve', even_labels, even_predictions, 1)
+    return even_acc, odd_acc
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,

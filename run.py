@@ -18,10 +18,9 @@ from tagging.tetratagger import BottomUpTetratagger
 
 logging.getLogger().setLevel(logging.INFO)
 
-writer = SummaryWriter()
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
+
 
 TETRATAGGER = "tetra"
 TD_SR = "td-sr"
@@ -67,9 +66,10 @@ evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
-evaluate.add_argument('--max-depth', type=int, default=12, help="Max stack depth used for decoding")
+evaluate.add_argument('--max-depth', type=int, default=12,
+                      help="Max stack depth used for decoding")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
-                   help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
+                      help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
 
 
 def initialize_tag_system(tagging_schema, tag_vocab_path=""):
@@ -78,11 +78,14 @@ def initialize_tag_system(tagging_schema, tag_vocab_path=""):
         with open(tag_vocab_path + tagging_schema + '.pkl', 'rb') as f:
             tag_vocab = pickle.load(f)
     if tagging_schema == BU_SR:
-        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
+        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab,
+                                      add_remove_top=True)
     elif tagging_schema == TD_SR:
-        tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
+        tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab,
+                                     add_remove_top=True)
     elif tagging_schema == TETRATAGGER:
-        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab, add_remove_top=True)
+        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'),
+                                         tag_vocab=tag_vocab, add_remove_top=True)
     else:
         logging.error("Please specify the tagging schema")
         return
@@ -177,9 +180,11 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
     return optimizer, lr_scheduler, num_training_steps
 
 
-def initialize_tensorboard(run_name):
-    writer.add_text('run name', 'model {}'.format(run_name), 0)
-    return run_name
+def register_run_metrics(writer, run_name, lr, epochs, eval_loss, even_tag_accuracy,
+                         odd_tag_accuracy):
+    writer.add_hparams({'run_name': run_name, 'lr': lr, 'epochs': epochs},
+                       {'eval_loss': eval_loss, 'odd_tag_accuracy': odd_tag_accuracy,
+                        'even_tag_accuracy': even_tag_accuracy})
 
 
 def train(args):
@@ -197,12 +202,15 @@ def train(args):
                                                                                      args.num_warmup_steps,
                                                                                      args.weight_decay)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
+    writer = None
     if args.use_tensorboard:
-        run_name = initialize_tensorboard(run_name)
+        writer = SummaryWriter(comment=run_name)
+
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
     n_iter = 0
+    eval_loss = 0
     for _ in tq(range(args.epochs)):
         for batch in tq(train_dataloader):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -213,7 +221,7 @@ def train(args):
                 writer.add_scalar('Loss/train', loss, n_iter)
 
             if n_iter % 2000 == 0:
-                report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
             optimizer.step()
             lr_scheduler.step()
@@ -225,7 +233,9 @@ def train(args):
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, device)
-    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
+    even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
+                                          args.use_tensorboard)
+    register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
 
 
 def decode_model_name(model_name):
@@ -245,8 +255,9 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
         num_tags = len(tag_system.tag_vocab)
     else:
         num_leaf_labels = len(tag_system.tag_vocab)
-        num_tags = 2*len(tag_system.tag_vocab)
+        num_tags = 2 * len(tag_system.tag_vocab)
     return num_leaf_labels, num_tags
+
 
 def evaluate(args):
     tagging_schema, model_type = decode_model_name(args.model_name)
@@ -267,7 +278,7 @@ def evaluate(args):
                                        num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
-                    args.model_name, args.max_depth) #TODO: missing CRF transition matrix
+                    args.model_name, args.max_depth)  # TODO: missing CRF transition matrix
 
 
 def main():
