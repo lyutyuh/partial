@@ -33,11 +33,6 @@ BERTLSTM = "bert+lstm"
 
 MODEL_NAME = "distilbert"
 
-# project and entity names for wandb
-# TODO: remove the credentials later
-PROJECT = "pat"
-ENTITY = "afraamini"
-
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
 train = subparser.add_parser('train')
@@ -58,8 +53,8 @@ train.add_argument('--model-path', type=str, default='distilbert',
                    help="Bert model path or name")
 train.add_argument('--output-path', type=str, default='pat-models/',
                    help="Path to save trained models")
-train.add_argument('--use-wandb', type=bool, default=False,
-                   help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
+train.add_argument('--use-tensorboard', type=bool, default=False,
+                   help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
 
 train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
@@ -74,8 +69,8 @@ evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
 evaluate.add_argument('--max-depth', type=int, default=12, help="Max stack depth used for decoding")
-evaluate.add_argument('--use-wandb', type=bool, default=False,
-                   help="Whether to use the wandb for logging the results make sure to add credentials to run.py if set to true")
+evaluate.add_argument('--use-tensorboard', type=bool, default=False,
+                   help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
 
 
 def initialize_tag_system(tagging_schema, tag_vocab_path=""):
@@ -183,14 +178,8 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
     return optimizer, lr_scheduler, num_training_steps
 
 
-def initialize_wandb(project_name, entity, run_name, args):
-    wandb.init(project=project_name, entity=entity)
-    wandb.run.name = run_name
-    wandb.config = {
-        "learning_rate": args.lr,
-        "epochs": args.epochs,
-        "batch_size": args.batch_size
-    }
+def initialize_tensorboard(run_name, args):
+
     return run_name
 
 
@@ -209,9 +198,8 @@ def train(args):
                                                                                      args.num_warmup_steps,
                                                                                      args.weight_decay)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
-    if args.use_wandb:
-        run_name = initialize_wandb(PROJECT, ENTITY,
-                                run_name, args)
+    if args.use_tensorboard:
+        run_name = initialize_tensorboard(run_name, args)
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
@@ -222,9 +210,8 @@ def train(args):
             outputs = model(**batch)
             loss = outputs[0]
             loss.backward()
-            if args.use_wandb:
+            if args.use_tensorboard:
                 writer.add_scalar('Loss/train', loss, n_iter)
-                # wandb.log({"loss": loss})
 
             if n_iter % 100 == 0:
                 report_eval_loss(model, eval_dataloader, device, n_iter, writer)
@@ -239,7 +226,7 @@ def train(args):
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, device)
-    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
+    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name, args.max_depth)
 
@@ -265,8 +252,6 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
     return num_leaf_labels, num_tags
 
 def evaluate(args):
-    if args.use_wandb:
-        wandb.init(project=PROJECT, entity=ENTITY, resume=True)
     tagging_schema, model_type = decode_model_name(args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
@@ -282,7 +267,7 @@ def evaluate(args):
 
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, device)
-    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
+    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name, args.max_depth) #TODO: missing CRF transition matrix
 

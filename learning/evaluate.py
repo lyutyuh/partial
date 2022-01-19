@@ -37,10 +37,11 @@ def predict(model, eval_dataloader, dataset_size, num_tags, device):
         labels = batch['labels']
         eval_labels[idx * 16:(idx + 1) * 16, :] = labels.cpu().numpy()
         idx += 1
+
     return predictions, eval_labels
 
 
-def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, use_wandb):
+def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_tensorboard):
     even_predictions = predictions[..., -num_leaf_labels:]
     odd_predictions = predictions[..., :-num_leaf_labels]
     even_labels = eval_labels % (num_leaf_labels + 1) - 1
@@ -58,9 +59,9 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, use_wandb):
     logging.info('odd_tags_accuracy: {}'.format(odd_acc))
     logging.info('even_tags_accuracy: {}'.format(even_acc))
 
-    if use_wandb:
-        wandb.log({"odd_tags_accuracy": odd_acc})
-        wandb.log({"even_tags_accuracy": even_acc})
+    if use_tensorboard:
+        writer.add_pr_curve('pr_curve', odd_labels, odd_predictions, 0)
+        writer.add_pr_curve('pr_curve', even_labels, even_predictions, 0)
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,
