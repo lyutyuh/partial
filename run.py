@@ -242,7 +242,7 @@ def decode_model_name(model_name):
         model_type = name_chunks[2]
     else:
         tagging_schema = name_chunks[0]
-        model_type = name_chunks[2]
+        model_type = name_chunks[1]
     return tagging_schema, model_type
 
 
