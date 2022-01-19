@@ -60,8 +60,8 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_ten
     logging.info('even_tags_accuracy: {}'.format(even_acc))
 
     if use_tensorboard:
-        writer.add_pr_curve('pr_curve', odd_labels, odd_predictions, 0)
-        writer.add_pr_curve('pr_curve', even_labels, even_predictions, 0)
+        writer.add_pr_curve('odd_tags_pr_curve', odd_labels, odd_predictions, 0)
+        writer.add_pr_curve('even_tags_pr_curve', even_labels, even_predictions, 1)
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,

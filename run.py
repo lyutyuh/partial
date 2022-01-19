@@ -212,7 +212,7 @@ def train(args):
             if args.use_tensorboard:
                 writer.add_scalar('Loss/train', loss, n_iter)
 
-            if n_iter % 2000 == 1:
+            if n_iter % 2000 == 0:
                 report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
             optimizer.step()
@@ -226,8 +226,6 @@ def train(args):
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
-    calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
-                    args.model_name, args.max_depth)
 
 
 def decode_model_name(model_name):
