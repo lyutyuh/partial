@@ -178,8 +178,8 @@ def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epo
     return optimizer, lr_scheduler, num_training_steps
 
 
-def initialize_tensorboard(run_name, args):
-
+def initialize_tensorboard(run_name):
+    writer.add_text('run name', 'model {}'.format(run_name), 0)
     return run_name
 
 
@@ -199,7 +199,7 @@ def train(args):
                                                                                      args.weight_decay)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     if args.use_tensorboard:
-        run_name = initialize_tensorboard(run_name, args)
+        run_name = initialize_tensorboard(run_name)
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
@@ -253,6 +253,7 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 
 def evaluate(args):
     tagging_schema, model_type = decode_model_name(args.model_name)
+    initialize_tensorboard(args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
