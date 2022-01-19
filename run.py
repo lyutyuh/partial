@@ -261,7 +261,7 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 
 def evaluate(args):
     tagging_schema, model_type = decode_model_name(args.model_name)
-    initialize_tensorboard(args.model_name)
+    writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
