@@ -6,9 +6,9 @@ import logging
 import wandb
 
 
-def report_eval_loss(model, eval_dataloader, device, use_wandb):
+def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
     loss = []
-    for batch in tq(eval_dataloader):
+    for batch in eval_dataloader:
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
@@ -16,8 +16,8 @@ def report_eval_loss(model, eval_dataloader, device, use_wandb):
 
     mean_loss = np.mean(loss)
     logging.info("Eval Loss: {}".format(mean_loss))
-    if use_wandb:
-        wandb.log({"eval_loss": mean_loss})
+    if writer is not None:
+        writer.add_scalar('eval_loss', mean_loss, n_iter)
 
 
 def predict(model, eval_dataloader, dataset_size, num_tags, device):

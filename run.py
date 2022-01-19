@@ -1,24 +1,25 @@
 import argparse
 import logging
 import pickle
+from torch.utils.tensorboard import SummaryWriter
 
 import torch
 import transformers
-import wandb
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from torch.utils.data import DataLoader
-from transformers import AdamW
 from tqdm import tqdm as tq
+from transformers import AdamW
 
+import wandb
 from learning.dataset import TaggingDataset
+from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
-from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 
 logging.getLogger().setLevel(logging.INFO)
 
-logging.getLogger().setLevel(logging.INFO)
+writer = SummaryWriter()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
@@ -214,7 +215,7 @@ def train(args):
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
-    idx = 0
+    n_iter = 0
     for _ in tq(range(args.epochs)):
         for batch in tq(train_dataloader):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -222,17 +223,25 @@ def train(args):
             loss = outputs[0]
             loss.backward()
             if args.use_wandb:
-                wandb.log({"loss": loss})
+                writer.add_scalar('Loss/train', loss, n_iter)
+                # wandb.log({"loss": loss})
 
-            if idx % 100 == 0:
-                report_eval_loss(model, eval_dataloader, device, args.use_wandb)
+            if n_iter % 100 == 0:
+                report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
-            idx += 1
+            n_iter += args.batch_size
 
     torch.save(model.state_dict(), args.output_path + run_name)
+
+    num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
+    predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
+                                       num_tags, device)
+    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
+    calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
+                    args.model_name, args.max_depth)
 
 
 def decode_model_name(model_name):
@@ -242,9 +251,18 @@ def decode_model_name(model_name):
         model_type = name_chunks[2]
     else:
         tagging_schema = name_chunks[0]
-        model_type = name_chunks[2]
+        model_type = name_chunks[1]
     return tagging_schema, model_type
 
+
+def calc_num_tags_per_task(tagging_schema, tag_system):
+    if tagging_schema == TETRATAGGER:
+        num_leaf_labels = tag_system.decode_moderator.leaf_tag_vocab_size
+        num_tags = len(tag_system.tag_vocab)
+    else:
+        num_leaf_labels = len(tag_system.tag_vocab)
+        num_tags = 2*len(tag_system.tag_vocab)
+    return num_leaf_labels, num_tags
 
 def evaluate(args):
     if args.use_wandb:
@@ -259,12 +277,9 @@ def evaluate(args):
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
-    if tagging_schema == TETRATAGGER:
-        num_leaf_labels = tag_system.decode_moderator.leaf_tag_vocab_size
-        num_tags = len(tag_system.tag_vocab)
-    else:
-        num_leaf_labels = len(tag_system.tag_vocab)
-        num_tags = 2*len(tag_system.tag_vocab)
+
+    num_leaf_labels, num_tags = calc_num_tags_per_task(tagging_schema, tag_system)
+
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, args.use_wandb)
