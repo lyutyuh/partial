@@ -223,6 +223,7 @@ def train(args):
             if n_iter % 2000 == 0:
                 eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
