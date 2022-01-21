@@ -1,7 +1,7 @@
 import torch
 import transformers
 from torch import nn
-from transformers import AutoModel
+from transformers import BertForTokenClassification
 
 from learning.crf import CRF
 
@@ -42,7 +42,7 @@ class BertCRFModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        self.bert = AutoModel.from_pretrained(self.model_path,
+        self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.crf = CRF(
@@ -96,7 +96,7 @@ class BertLSTMModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        self.bert = AutoModel.from_pretrained(self.model_path,
+        self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         self.lstm = nn.LSTM(
             self.num_tags, self.num_tags, 2, batch_first=True, bidirectional=True,
@@ -135,7 +135,7 @@ class BertLSTMModel(nn.Module):
         return loss, lstm_out
 
 
-class ModelForTetratagging(transformers.AutoModel):
+class ModelForTetratagging(transformers.BertForTokenClassification):
     def __init__(self, config):
         super().__init__(config)
         self.num_even_tags = config.task_specific_params['num_even_tags']

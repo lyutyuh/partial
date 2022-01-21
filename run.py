@@ -206,6 +206,7 @@ def train(args):
     if args.use_tensorboard:
         writer = SummaryWriter(comment=run_name)
 
+    model = torch.nn.DataParallel(model)
     model.to(device)
     logging.info("Starting The Training Loop")
     model.train()
