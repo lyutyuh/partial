@@ -217,7 +217,7 @@ def train(args):
             loss = outputs[0]
             loss.mean().backward()
             if args.use_tensorboard:
-                writer.add_scalar('Loss/train', loss, n_iter)
+                writer.add_scalar('Loss/train', torch.mean(loss), n_iter)
 
             if n_iter % 2000 == 0:
                 eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
