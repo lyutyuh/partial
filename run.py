@@ -29,8 +29,6 @@ BERT = "bert"
 BERTCRF = "bert+crf"
 BERTLSTM = "bert+lstm"
 
-MODEL_NAME = "distilbert"
-
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
 train = subparser.add_parser('train')
@@ -98,9 +96,9 @@ def save_vocab(args):
         pickle.dump(tag_system.tag_vocab, f)
 
 
-def prepare_training_data(tag_system, tagging_schema, batch_size):
+def prepare_training_data(tag_system, tagging_schema, model_name, batch_size):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
-    tokenizer = transformers.AutoTokenizer.from_pretrained(MODEL_NAME, truncation=True,
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
     train_dataset = TaggingDataset('train', tokenizer, tag_system, reader, device,
                                    is_tetratags=is_tetratags)
@@ -118,7 +116,7 @@ def prepare_training_data(tag_system, tagging_schema, batch_size):
 def generate_config(model_type, tagging_schema, tag_system, model_path):
     if model_type == BERTCRF or model_type == BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
-            MODEL_NAME,
+            model_path,
             num_labels=2 * len(tag_system.tag_vocab),
             task_specific_params={
                 'model_path': model_path,
@@ -127,7 +125,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
         )
     elif model_type == BERT and tagging_schema == TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
-            MODEL_NAME,
+            model_path,
             num_labels=len(tag_system.tag_vocab),
             id2label={i: label for i, label in enumerate(tag_system.tag_vocab)},
             label2id={label: i for i, label in enumerate(tag_system.tag_vocab)},
@@ -139,7 +137,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
         )
     elif model_type == BERT and tagging_schema != TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
-            MODEL_NAME,
+            model_path,
             num_labels=2 * len(tag_system.tag_vocab),
             task_specific_params={
                 'model_path': model_path,
@@ -160,7 +158,7 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path):
     elif model_type == BERTLSTM:
         model = BertLSTMModel(config=config)
     elif model_type == BERT:
-        model = ModelForTetratagging.from_pretrained(MODEL_NAME, config=config)
+        model = ModelForTetratagging.from_pretrained(model_path, config=config)
     else:
         logging.error("Invalid model type")
         return
@@ -192,7 +190,7 @@ def train(args):
     tag_system = initialize_tag_system(args.tagger, args.tag_vocab_path)
     logging.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
-        tag_system, args.tagger, args.batch_size)
+        tag_system, args.tagger, args.model_path, args.batch_size)
     logging.info("Initializing The Model")
     model = initialize_model(args.model, args.tagger, tag_system, args.model_path)
     optimizer, lr_scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
@@ -268,7 +266,7 @@ def evaluate(args):
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
     _, eval_dataset, _, eval_dataloader = prepare_training_data(
-        tag_system, tagging_schema, args.batch_size)
+        tag_system, tagging_schema, args.bert_model_path, args.batch_size)
 
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
