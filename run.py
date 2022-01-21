@@ -232,7 +232,7 @@ def train(args):
 
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, device)
+                                       num_tags, args.batch_size, device)
     even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
                                           args.use_tensorboard)
     register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
@@ -275,7 +275,7 @@ def evaluate(args):
     num_leaf_labels, num_tags = calc_num_tags_per_task(tagging_schema, tag_system)
 
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, device)
+                                       num_tags, args.batch_size, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
     calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name, args.max_depth)  # TODO: missing CRF transition matrix

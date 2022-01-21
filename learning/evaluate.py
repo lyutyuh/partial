@@ -20,22 +20,22 @@ def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
     return mean_loss
 
 
-def predict(model, eval_dataloader, dataset_size, num_tags, device):
+def predict(model, eval_dataloader, dataset_size, num_tags, batch_size, device):
     model.eval()
     predictions = np.zeros((dataset_size, 256, num_tags))
     eval_labels = np.zeros((dataset_size, 256), dtype=int)
     idx = 0
     for batch in tq(eval_dataloader):
-        if idx * 16 >= dataset_size:
+        if idx * batch_size >= dataset_size:
             break
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
 
         logits = outputs[1]
-        predictions[idx * 16:(idx + 1) * 16, :, :] = logits.cpu().numpy()
+        predictions[idx * batch_size:(idx + 1) * batch_size, :, :] = logits.cpu().numpy()
         labels = batch['labels']
-        eval_labels[idx * 16:(idx + 1) * 16, :] = labels.cpu().numpy()
+        eval_labels[idx * batch_size:(idx + 1) * batch_size, :] = labels.cpu().numpy()
         idx += 1
 
     return predictions, eval_labels
