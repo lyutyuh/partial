@@ -215,7 +215,7 @@ def train(args):
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
             loss = outputs[0]
-            loss.backward()
+            loss.mean().backward()
             if args.use_tensorboard:
                 writer.add_scalar('Loss/train', loss, n_iter)
 
