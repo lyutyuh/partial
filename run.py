@@ -21,7 +21,6 @@ logging.getLogger().setLevel(logging.INFO)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
 
-
 TETRATAGGER = "tetra"
 TD_SR = "td-sr"
 BU_SR = "bu-sr"
@@ -108,8 +107,8 @@ def prepare_training_data(tag_system, tagging_schema, model_name, batch_size):
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
     )
     eval_dataloader = DataLoader(
-        eval_dataset, batch_size=batch_size, collate_fn=eval_dataset.collate
-    )
+        eval_dataset, batch_size=16, collate_fn=eval_dataset.collate
+    )  # TODO: remove the constant batch size
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
@@ -232,7 +231,7 @@ def train(args):
 
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, args.batch_size, device)
+                                       num_tags, 16, device) # TODO: remove the constant batch size
     even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
                                           args.use_tensorboard)
     register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
@@ -269,6 +268,7 @@ def evaluate(args):
         tag_system, tagging_schema, args.bert_model_path, args.batch_size)
 
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
+    model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
 
