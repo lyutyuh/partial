@@ -166,16 +166,17 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path):
     return model
 
 
-def initialize_optimizer_and_scheduler(dataset_size, lr=5e-5, num_epochs=4,
+def initialize_optimizer_and_scheduler(model, dataset_size, lr=5e-5, num_epochs=4,
                                        num_warmup_steps=160, weight_decay_rate=0.0):
-
     num_training_steps = num_epochs * dataset_size
-    optimizer, scheduler = transformers.create_optimizer(
-        init_lr=lr,
-        num_train_steps=num_training_steps,
-        weight_decay_rate=weight_decay_rate,
+    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay_rate)
+    scheduler = transformers.get_scheduler(
+        "constant_with_warmup",
+        optimizer=optimizer,
         num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps
     )
+
     return optimizer, scheduler, num_training_steps
 
 
@@ -194,11 +195,12 @@ def train(args):
         tag_system, args.tagger, args.model_path, args.batch_size)
     logging.info("Initializing The Model")
     model = initialize_model(args.model, args.tagger, tag_system, args.model_path)
-    optimizer, scheduler, num_training_steps = initialize_optimizer_and_scheduler(len(train_dataloader),
-                                                                                     args.lr,
-                                                                                     args.epochs,
-                                                                                     args.num_warmup_steps,
-                                                                                     args.weight_decay)
+    optimizer, scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
+                                                                                  len(train_dataloader),
+                                                                                  args.lr,
+                                                                                  args.epochs,
+                                                                                  args.num_warmup_steps,
+                                                                                  args.weight_decay)
     run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     writer = None
     if args.use_tensorboard:
@@ -227,7 +229,7 @@ def train(args):
 
             if t % when_to_eval == 0:
                 eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
-                if eval_loss < last_eval_loss: # TODO: compute f1
+                if eval_loss < last_eval_loss:  # TODO: compute f1
                     tol = 3
                     last_eval_loss = eval_loss
                 else:
