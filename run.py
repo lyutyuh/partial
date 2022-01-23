@@ -117,6 +117,18 @@ def prepare_training_data(tag_system, tagging_schema, model_name, batch_size):
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
+def prepare_test_data(tag_system, tagging_schema, model_name):
+    is_tetratags = True if tagging_schema == TETRATAGGER else False
+    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
+                                                           use_fast=True)
+    test_dataset = TaggingDataset('test', tokenizer, tag_system, reader, device,
+                                  pad_to_len=256, is_tetratags=is_tetratags)
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=16, collate_fn=test_dataset.collate
+    )  # TODO: remove the constant batch size
+    return test_dataset, test_dataloader
+
+
 def generate_config(model_type, tagging_schema, tag_system, model_path):
     if model_type == BERTCRF or model_type == BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
@@ -306,8 +318,8 @@ def evaluate(args):
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
-    _, eval_dataset, _, eval_dataloader = prepare_training_data(
-        tag_system, tagging_schema, args.bert_model_path, args.batch_size)
+    eval_dataset, eval_dataloader = prepare_test_data(
+        tag_system, tagging_schema, args.bert_model_path)
 
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
     model = torch.nn.DataParallel(model)
@@ -319,8 +331,9 @@ def evaluate(args):
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, args.batch_size, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
-    calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
+    parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
                     args.model_name, args.max_depth)  # TODO: missing CRF transition matrix
+    print(parse_metrics)
 
 
 def main():
