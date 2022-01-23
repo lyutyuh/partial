@@ -53,6 +53,9 @@ train.add_argument('--output-path', type=str, default='pat-models/',
 train.add_argument('--use-tensorboard', type=bool, default=False,
                    help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
 
+train.add_argument('--max-depth', type=int, default=25,
+                   help="Max stack depth used for decoding")
+
 train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
 train.add_argument('--batch-size', type=int, default=16)
@@ -65,7 +68,7 @@ evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
-evaluate.add_argument('--max-depth', type=int, default=12,
+evaluate.add_argument('--max-depth', type=int, default=25,
                       help="Max stack depth used for decoding")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
                       help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
@@ -206,6 +209,7 @@ def train(args):
     if args.use_tensorboard:
         writer = SummaryWriter(comment=run_name)
 
+    num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     model = torch.nn.DataParallel(model)
     model.to(device)
     logging.info("Starting The Training Loop")
@@ -214,7 +218,7 @@ def train(args):
 
     when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
     eval_loss = 0
-    last_eval_loss = np.inf
+    last_fscore = 0
     tol = 3
 
     for _ in tq(range(args.epochs)):
@@ -228,10 +232,19 @@ def train(args):
                 writer.add_scalar('Loss/train', torch.mean(loss), n_iter)
 
             if t % when_to_eval == 0:
-                eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
-                if eval_loss < last_eval_loss:  # TODO: compute f1
+                predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
+                                                   num_tags, 16,
+                                                   device)  # TODO: remove the constant batch size
+                dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
+                                              tag_system, None,
+                                              "", args.max_depth)
+                writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
+                writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
+                writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
+                # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                if dev_metrics.fscore > last_fscore:  # TODO: compute f1
                     tol = 3
-                    last_eval_loss = eval_loss
+                    last_fscore = dev_metrics.fscore
                 else:
                     tol -= 1
                     for g in optimizer.param_groups:

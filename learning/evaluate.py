@@ -10,7 +10,26 @@ import torch
 from tqdm import tqdm as tq
 
 
-def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
+class ParseMetrics(object):
+    # Code from: https://github.com/mrdrozdov/self-attentive-parser-with-extra-features/blob/master/src/evaluate.py
+    def __init__(self, recall, precision, fscore, complete_match, tagging_accuracy=100):
+        self.recall = recall
+        self.precision = precision
+        self.fscore = fscore
+        self.complete_match = complete_match
+        self.tagging_accuracy = tagging_accuracy
+
+    def __str__(self):
+        if self.tagging_accuracy < 100:
+            return "(Recall={:.2f}, Precision={:.2f}, ParseMetrics={:.2f}, CompleteMatch={:.2f}, TaggingAccuracy={:.2f})".format(
+                self.recall, self.precision, self.fscore, self.complete_match,
+                self.tagging_accuracy)
+        else:
+            return "(Recall={:.2f}, Precision={:.2f}, ParseMetrics={:.2f}, CompleteMatch={:.2f})".format(
+                self.recall, self.precision, self.fscore, self.complete_match)
+
+
+def report_eval_loss(model, eval_dataloader, device, n_iter, writer) -> np.ndarray:
     loss = []
     for batch in eval_dataloader:
         batch = {k: v.to(device) for k, v in batch.items()}
@@ -25,7 +44,7 @@ def report_eval_loss(model, eval_dataloader, device, n_iter, writer):
     return mean_loss
 
 
-def predict(model, eval_dataloader, dataset_size, num_tags, batch_size, device):
+def predict(model, eval_dataloader, dataset_size, num_tags, batch_size, device) -> ([], []):
     model.eval()
     predictions = np.zeros((dataset_size, 256, num_tags))
     eval_labels = np.zeros((dataset_size, 256), dtype=int)
@@ -46,7 +65,8 @@ def predict(model, eval_dataloader, dataset_size, num_tags, batch_size, device):
     return predictions, eval_labels
 
 
-def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_tensorboard):
+def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_tensorboard) -> (
+float, float):
     even_predictions = predictions[..., -num_leaf_labels:]
     odd_predictions = predictions[..., :-num_leaf_labels]
     even_labels = eval_labels % (num_leaf_labels + 1) - 1
@@ -71,7 +91,7 @@ def calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, use_ten
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,
-                    model_name, max_depth):
+                    model_name, max_depth) -> ParseMetrics:
     predicted_dev_trees = []
     gold_dev_trees = []
     c_err = 0
@@ -96,7 +116,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
     logging.warning("Number of binarization error: {}".format(c_err))
     # save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     # save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
-    print(evalb("EVALB/", gold_dev_trees, predicted_dev_trees))
+    return evalb("EVALB/", gold_dev_trees, predicted_dev_trees)
 
 
 def save_predictions(predicted_trees, file_path):
@@ -105,26 +125,7 @@ def save_predictions(predicted_trees, file_path):
             f.write(' '.join(str(tree).split()) + '\n')
 
 
-class FScore(object):
-    # Code from: https://github.com/mrdrozdov/self-attentive-parser-with-extra-features/blob/master/src/evaluate.py
-    def __init__(self, recall, precision, fscore, complete_match, tagging_accuracy=100):
-        self.recall = recall
-        self.precision = precision
-        self.fscore = fscore
-        self.complete_match = complete_match
-        self.tagging_accuracy = tagging_accuracy
-
-    def __str__(self):
-        if self.tagging_accuracy < 100:
-            return "(Recall={:.2f}, Precision={:.2f}, FScore={:.2f}, CompleteMatch={:.2f}, TaggingAccuracy={:.2f})".format(
-                self.recall, self.precision, self.fscore, self.complete_match,
-                self.tagging_accuracy)
-        else:
-            return "(Recall={:.2f}, Precision={:.2f}, FScore={:.2f}, CompleteMatch={:.2f})".format(
-                self.recall, self.precision, self.fscore, self.complete_match)
-
-
-def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
+def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None) -> ParseMetrics:
     # Code from: https://github.com/mrdrozdov/self-attentive-parser-with-extra-features/blob/master/src/evaluate.py
     assert os.path.exists(evalb_dir)
     evalb_program_path = os.path.join(evalb_dir, "evalb")
@@ -144,7 +145,7 @@ def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
     for gold_tree, predicted_tree in zip(gold_trees, predicted_trees):
         gold_leaves = list(gold_tree.leaves())
         predicted_leaves = list(predicted_tree.leaves())
-        
+
     temp_dir = tempfile.TemporaryDirectory(prefix="evalb-")
     gold_path = os.path.join(temp_dir.name, "gold.txt")
     predicted_path = os.path.join(temp_dir.name, "predicted.txt")
@@ -175,7 +176,7 @@ def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
     )
     subprocess.run(command, shell=True)
 
-    fscore = FScore(math.nan, math.nan, math.nan, math.nan)
+    fscore = ParseMetrics(math.nan, math.nan, math.nan, math.nan)
     with open(output_path) as infile:
         for line in infile:
             match = re.match(r"Bracketing Recall\s+=\s+(\d+\.\d+)", line)
