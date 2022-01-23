@@ -212,7 +212,7 @@ def train(args):
     model.train()
     n_iter = 0
 
-    when_to_eval = int(len(train_dataset) / 4)
+    when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
     eval_loss = 0
     last_eval_loss = np.inf
     tol = 3
@@ -246,7 +246,7 @@ def train(args):
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad()
-            n_iter += args.batch_size
+            n_iter += 1
             t += args.batch_size
 
     _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
