@@ -96,7 +96,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
     logging.warning("Number of binarization error: {}".format(c_err))
     # save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     # save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
-    print(evalb("EVALB", gold_dev_trees, predicted_dev_trees))
+    print(evalb("EVALB/", gold_dev_trees, predicted_dev_trees))
 
 
 def save_predictions(predicted_trees, file_path):
@@ -144,11 +144,7 @@ def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
     for gold_tree, predicted_tree in zip(gold_trees, predicted_trees):
         gold_leaves = list(gold_tree.leaves())
         predicted_leaves = list(predicted_tree.leaves())
-        assert len(gold_leaves) == len(predicted_leaves)
-        assert all(
-            gold_leaf.word == predicted_leaf.word
-            for gold_leaf, predicted_leaf in zip(gold_leaves, predicted_leaves))
-
+        
     temp_dir = tempfile.TemporaryDirectory(prefix="evalb-")
     gold_path = os.path.join(temp_dir.name, "gold.txt")
     predicted_path = os.path.join(temp_dir.name, "predicted.txt")
@@ -157,7 +153,7 @@ def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
     with open(gold_path, "w") as outfile:
         if ref_gold_path is None:
             for tree in gold_trees:
-                outfile.write("{}\n".format(tree.linearize()))
+                outfile.write(' '.join(str(tree).split()) + '\n')
         else:
             # For the SPMRL dataset our data loader performs some modifications
             # (like stripping morphological features), so we compare to the
@@ -168,7 +164,7 @@ def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None):
 
     with open(predicted_path, "w") as outfile:
         for tree in predicted_trees:
-            outfile.write("{}\n".format(tree.linearize()))
+            outfile.write(' '.join(str(tree).split()) + '\n')
 
     command = "{} -p {} {} {} > {}".format(
         evalb_program_path,
