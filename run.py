@@ -1,6 +1,8 @@
 import argparse
 import logging
 import pickle
+
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 import torch
@@ -164,17 +166,17 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path):
     return model
 
 
-def initialize_optimizer_and_scheduler(model, train_dataloader, lr=5e-5, num_epochs=4,
-                                       num_warmup_steps=160, weight_decay=0.01):
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+def initialize_optimizer_and_scheduler(dataset_size, lr=5e-5, num_epochs=4,
+                                       num_warmup_steps=160, weight_decay_rate=0.0):
 
-    num_training_steps = num_epochs * len(train_dataloader)
-    lr_scheduler = transformers.get_linear_schedule_with_warmup(
-        optimizer=optimizer,
+    num_training_steps = num_epochs * dataset_size
+    optimizer, scheduler = transformers.create_optimizer(
+        init_lr=lr,
+        num_train_steps=num_training_steps,
+        weight_decay_rate=weight_decay_rate,
         num_warmup_steps=num_warmup_steps,
-        num_training_steps=num_training_steps,
     )
-    return optimizer, lr_scheduler, num_training_steps
+    return optimizer, scheduler, num_training_steps
 
 
 def register_run_metrics(writer, run_name, lr, epochs, eval_loss, even_tag_accuracy,
@@ -192,8 +194,7 @@ def train(args):
         tag_system, args.tagger, args.model_path, args.batch_size)
     logging.info("Initializing The Model")
     model = initialize_model(args.model, args.tagger, tag_system, args.model_path)
-    optimizer, lr_scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
-                                                                                     train_dataloader,
+    optimizer, scheduler, num_training_steps = initialize_optimizer_and_scheduler(len(train_dataloader),
                                                                                      args.lr,
                                                                                      args.epochs,
                                                                                      args.num_warmup_steps,
@@ -208,8 +209,14 @@ def train(args):
     logging.info("Starting The Training Loop")
     model.train()
     n_iter = 0
+
+    when_to_eval = int(len(train_dataset) / 4)
     eval_loss = 0
+    last_eval_loss = np.inf
+    tol = 3
+
     for _ in tq(range(args.epochs)):
+        t = 0
         for batch in tq(train_dataloader):
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
@@ -218,20 +225,40 @@ def train(args):
             if args.use_tensorboard:
                 writer.add_scalar('Loss/train', torch.mean(loss), n_iter)
 
-            if n_iter % 2000 == 0:
+            if t % when_to_eval == 0:
                 eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                if eval_loss < last_eval_loss: # TODO: compute f1
+                    tol = 3
+                    last_eval_loss = eval_loss
+                else:
+                    tol -= 1
+                    for g in optimizer.param_groups:
+                        g['lr'] = g['lr'] / 2
+
+                if tol < 0:
+                    _save_and_finish_training(model, tag_system, eval_dataloader,
+                                              eval_dataset, eval_loss, run_name, writer, args)
+                    return
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            lr_scheduler.step()
+            scheduler.step()
             optimizer.zero_grad()
             n_iter += args.batch_size
+            t += args.batch_size
 
+    _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
+                              run_name, writer, args)
+
+
+def _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
+                              run_name, writer, args):
     torch.save(model.state_dict(), args.output_path + run_name)
 
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, 16, device) # TODO: remove the constant batch size
+                                       num_tags, 16,
+                                       device)  # TODO: remove the constant batch size
     even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
                                           args.use_tensorboard)
     register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
