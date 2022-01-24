@@ -254,9 +254,8 @@ def train(args):
                 writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
                 # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
-                if dev_metrics.fscore > last_fscore:  # TODO: compute f1
+                if dev_metrics.fscore > last_fscore:
                     tol = 3
-                    last_fscore = dev_metrics.fscore
                 else:
                     tol -= 1
                     for g in optimizer.param_groups:
@@ -266,6 +265,7 @@ def train(args):
                     _save_and_finish_training(model, tag_system, eval_dataloader,
                                               eval_dataset, eval_loss, run_name, writer, args)
                     return
+                last_fscore = dev_metrics.fscore
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -331,8 +331,10 @@ def evaluate(args):
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, args.batch_size, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
-    parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, args.output_path,
-                    args.model_name, args.max_depth)  # TODO: missing CRF transition matrix
+    parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system,
+                                    args.output_path,
+                                    args.model_name,
+                                    args.max_depth)  # TODO: missing CRF transition matrix
     print(parse_metrics)
 
 
