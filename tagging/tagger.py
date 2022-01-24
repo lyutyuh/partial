@@ -43,7 +43,6 @@ class Tagger(ABC):
 
     def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
         tags = self.tree_to_tags_pipeline(tree)
-        print(tags)
         res = []
         for tag in tags:
             if tag in self.tag_vocab:
