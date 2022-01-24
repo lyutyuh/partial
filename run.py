@@ -256,7 +256,7 @@ def train(args):
                 # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
                 if dev_metrics.fscore > last_fscore:
                     tol = 3
-                else:
+                elif dev_metrics.fscore > 0:
                     tol -= 1
                     for g in optimizer.param_groups:
                         g['lr'] = g['lr'] / 2
