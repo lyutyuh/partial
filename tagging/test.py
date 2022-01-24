@@ -10,7 +10,7 @@ from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from transform import LeftCornerTransformer, RightCornerTransformer
 from tree_tools import random_tree, is_topo_equal
 
-from original_tetratagger import TetraTagSequence
+from original_tetratagger import TetraTagSequence, TetraTagSystem
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from tqdm import tqdm as tq
 
@@ -141,16 +141,24 @@ class TestPipeline(unittest.TestCase):
             print(tag)
 
     def test_compare_to_original_tetratagger(self):
+        import pickle
+        with open("../data/tetra.pkl", 'rb') as f:
+            tag_vocab = pickle.load(f)
+
         READER = BracketParseCorpusReader('../data', ['train', 'dev', 'test'])
         trees = READER.parsed_sents('test')
-        tagger = BottomUpTetratagger(add_remove_top=True)
+        tagger = BottomUpTetratagger(add_remove_top=True, tag_vocab=tag_vocab)
+        tetratagger = TetraTagSystem(tag_vocab=tag_vocab)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            original_tags = TetraTagSequence.from_tree(original_tree)
+            # original_tags = TetraTagSequence.from_tree(original_tree)
             tags = tagger.tree_to_tags_pipeline(tree)
-            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
+            tetratags = tetratagger.tags_from_tree(tree)
+            # ids = tagger.tree_to_ids_pipeline(tree)
+            # ids = tagger.ids_from_tree(tree)
+            # tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             # self.assertEqual(original_tree, tree_back)
-            self.assertEqual(list(original_tags), list(tags))
+            self.assertEqual(list(tetratags), list(tags))
 
     def test_example_colab_lc(self):
         example_tree = Tree.fromstring(

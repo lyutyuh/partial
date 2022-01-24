@@ -43,8 +43,17 @@ class Tagger(ABC):
 
     def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
         tags = self.tree_to_tags_pipeline(tree)
-        return [self.tag_vocab.index(tag) if tag in self.tag_vocab else self.tag_vocab.index(
-            tag[0:tag.find("/")]) for tag in tags]
+        print(tags)
+        res = []
+        for tag in tags:
+            if tag in self.tag_vocab:
+                res.append(self.tag_vocab.index(tag))
+            elif tag[0:tag.find("/")] in self.tag_vocab:
+                res.append(self.tag_vocab.index(tag[0:tag.find("/")]))
+            else:
+                res.append(0)
+
+        return res
 
     def tags_to_tree_pipeline(self, tags: [str], input_seq: []) -> Tree:
         ptree = self.tags_to_tree(tags, input_seq)
