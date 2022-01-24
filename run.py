@@ -273,6 +273,7 @@ def train(args):
             optimizer.zero_grad()
             n_iter += 1
             t += 1
+            model.train()
 
     _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
                               run_name, writer, args)
