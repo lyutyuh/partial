@@ -4,7 +4,7 @@ from enum import Enum
 
 import numpy as np
 from nltk import ParentedTree
-
+from nltk import Tree
 
 class NodeType(Enum):
     NT = 0
@@ -62,3 +62,13 @@ def random_tree(node: ParentedTree, depth=0, p=.75, cutoff=7) -> None:
         label = "X/" + str(depth)
         right = ParentedTree(label, [random.choice(string.ascii_letters)])
         node.insert(1, right)
+
+
+def create_dummy_tree(leaves):
+    dummy_tree = Tree("S", [])
+    idx = 0
+    for token, pos in leaves:
+        dummy_tree.insert(idx, Tree(pos, [token]))
+        idx += 1
+
+    return dummy_tree

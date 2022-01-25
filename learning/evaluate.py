@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from tqdm import tqdm as tq
 
+from tagging.tree_tools import create_dummy_tree
+
 
 class ParseMetrics(object):
     # Code from: https://github.com/mrdrozdov/self-attentive-parser-with-extra-features/blob/master/src/evaluate.py
@@ -99,6 +101,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
         logits = predictions[i]
         is_word = eval_labels[i] != 0
         original_tree = eval_dataset.trees[i]
+        gold_dev_trees.append(original_tree)
         try:  # ignore the ones that failed in unchomsky_normal_form
             tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word,
                                              max_depth=max_depth)
@@ -107,12 +110,14 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
             message = template.format(type(ex).__name__, ex.args)
             print(message)
             c_err += 1
+            predicted_dev_trees.append(create_dummy_tree(original_tree.pos()))
             continue
         if tree.leaves() != original_tree.leaves():
             c_err += 1
+            predicted_dev_trees.append(create_dummy_tree(original_tree.pos()))
             continue
         predicted_dev_trees.append(tree)
-        gold_dev_trees.append(original_tree)
+
     logging.warning("Number of binarization error: {}".format(c_err))
     # save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     # save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")

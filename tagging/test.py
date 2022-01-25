@@ -5,10 +5,11 @@ import numpy as np
 from nltk import ParentedTree
 from nltk import Tree
 
+from learning.evaluate import evalb
 from tetratagger import BottomUpTetratagger, TopDownTetratagger
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from transform import LeftCornerTransformer, RightCornerTransformer
-from tree_tools import random_tree, is_topo_equal
+from tree_tools import random_tree, is_topo_equal, create_dummy_tree
 
 from original_tetratagger import TetraTagSequence, TetraTagSystem
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
@@ -139,6 +140,16 @@ class TestPipeline(unittest.TestCase):
         print(tags)
         for tag in tagger.tetra_visualize(tags):
             print(tag)
+
+    def test_dummy_tree(self):
+        example_tree = Tree.fromstring(
+            "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
+        print(example_tree.pos())
+        dummy = create_dummy_tree(example_tree.pos())
+        dummy.pretty_print()
+        example_tree.pretty_print()
+        print(evalb("../EVALB/", [example_tree], [dummy]))
+
 
     def test_compare_to_original_tetratagger(self):
         import pickle
