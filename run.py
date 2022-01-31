@@ -274,7 +274,8 @@ def train(args):
                     _finish_training(model, tag_system, eval_dataloader,
                                               eval_dataset, eval_loss, run_name, writer, args)
                     return
-                last_fscore = dev_metrics.fscore
+                if dev_metrics.fscore > 0: # not propagating the nan
+                    last_fscore = dev_metrics.fscore
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
