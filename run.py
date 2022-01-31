@@ -255,9 +255,14 @@ def train(args):
                 writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
                 # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                logging.info("current fscore {}".format(dev_metrics.fscore))
+                logging.info("last fscore {}".format(last_fscore))
+                logging.info("best fscore {}".format(best_fscore))
                 if dev_metrics.fscore > last_fscore:
                     tol = 3
+                    logging.info("CHECK! tol refill")
                     if dev_metrics.fscore > best_fscore:
+                        logging.info("CHECK! best model save")
                         best_fscore = dev_metrics.fscore
                         _save_best_model(model, args.output_path, run_name)
                 elif dev_metrics.fscore > 0:
