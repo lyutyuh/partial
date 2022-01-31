@@ -231,6 +231,7 @@ def train(args):
     when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
     eval_loss = 0
     last_fscore = 0
+    best_fscore = 0
     tol = 3
 
     for _ in tq(range(args.epochs)):
@@ -256,13 +257,16 @@ def train(args):
                 # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
                 if dev_metrics.fscore > last_fscore:
                     tol = 3
+                    if dev_metrics.fscore > best_fscore:
+                        best_fscore = dev_metrics.fscore
+                        _save_best_model(model, args.output_path, run_name)
                 elif dev_metrics.fscore > 0:
                     tol -= 1
                     for g in optimizer.param_groups:
                         g['lr'] = g['lr'] / 2
 
                 if tol < 0:
-                    _save_and_finish_training(model, tag_system, eval_dataloader,
+                    _finish_training(model, tag_system, eval_dataloader,
                                               eval_dataset, eval_loss, run_name, writer, args)
                     return
                 last_fscore = dev_metrics.fscore
@@ -275,13 +279,17 @@ def train(args):
             t += 1
             model.train()
 
-    _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
+    _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
                               run_name, writer, args)
 
 
-def _save_and_finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
+def _save_best_model(model, output_path, run_name):
+    logging.info("Saving The Newly Found Best Model")
+    torch.save(model.state_dict(), output_path + run_name)
+
+
+def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
                               run_name, writer, args):
-    torch.save(model.state_dict(), args.output_path + run_name)
 
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
