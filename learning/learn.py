@@ -42,7 +42,8 @@ class BertCRFModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        if config.is_eng:
+        is_eng = config.task_specific_params['is_eng']
+        if is_eng:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
@@ -100,7 +101,8 @@ class BertLSTMModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        if config.is_eng:
+        is_eng = config.task_specific_params['is_eng']
+        if is_eng:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
@@ -149,7 +151,8 @@ class ModelForTetratagging(nn.Module):
         self.num_even_tags = config.task_specific_params['num_even_tags']
         self.num_odd_tags = config.task_specific_params['num_odd_tags']
         self.model_path = config.task_specific_params['model_path']
-        if config.is_eng:
+        is_eng = config.task_specific_params['is_eng']
+        if is_eng:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
