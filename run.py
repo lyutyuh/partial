@@ -81,13 +81,13 @@ def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path=""):
         with open(tag_vocab_path + lang + "-" + tagging_schema + '.pkl', 'rb') as f:
             tag_vocab = pickle.load(f)
     if tagging_schema == BU_SR:
-        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab,
+        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents(lang+'.train'), tag_vocab=tag_vocab,
                                       add_remove_top=True)
     elif tagging_schema == TD_SR:
-        tag_system = SRTaggerTopDown(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab,
+        tag_system = SRTaggerTopDown(trees=reader.parsed_sents(lang+'.train'), tag_vocab=tag_vocab,
                                      add_remove_top=True)
     elif tagging_schema == TETRATAGGER:
-        tag_system = BottomUpTetratagger(trees=reader.parsed_sents('train'),
+        tag_system = BottomUpTetratagger(trees=reader.parsed_sents(lang+'.train'),
                                          tag_vocab=tag_vocab, add_remove_top=True)
     else:
         logging.error("Please specify the tagging schema")
@@ -103,13 +103,13 @@ def save_vocab(args):
         pickle.dump(tag_system.tag_vocab, f)
 
 
-def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_size):
+def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    train_dataset = TaggingDataset('train', tokenizer, tag_system, reader, device,
+    train_dataset = TaggingDataset(lang+'.train', tokenizer, tag_system, reader, device,
                                    is_tetratags=is_tetratags)
-    eval_dataset = TaggingDataset('dev', tokenizer, tag_system, reader, device,
+    eval_dataset = TaggingDataset(lang+'.dev', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
@@ -120,11 +120,11 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def prepare_test_data(reader, tag_system, tagging_schema, model_name):
+def prepare_test_data(reader, tag_system, tagging_schema, model_name, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    test_dataset = TaggingDataset('test', tokenizer, tag_system, reader, device,
+    test_dataset = TaggingDataset(lang+'.test', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     test_dataloader = DataLoader(
         test_dataset, batch_size=16, collate_fn=test_dataset.collate
@@ -217,7 +217,7 @@ def train(args):
     logging.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
         reader,
-        tag_system, args.tagger, args.model_path, args.batch_size)
+        tag_system, args.tagger, args.model_path, args.batch_size, args.lang)
     logging.info("Initializing The Model")
     is_eng = True if args.lang == ENG else False
     model = initialize_model(args.model, args.tagger, tag_system, args.model_path, is_eng)
@@ -348,7 +348,8 @@ def evaluate(args):
     logging.info("Preparing Data")
     eval_dataset, eval_dataloader = prepare_test_data(reader,
                                                       tag_system, tagging_schema,
-                                                      args.bert_model_path)
+                                                      args.bert_model_path,
+                                                      args.lang)
 
     is_eng = True if args.lang == ENG else False
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path, is_eng)
