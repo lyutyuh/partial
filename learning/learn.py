@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 from transformers import BertForTokenClassification
-from transformers import XLMRobertaForTokenClassification
 
 from learning.crf import CRF
 
@@ -47,7 +46,7 @@ class BertCRFModel(nn.Module):
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
-            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                          config=config)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.crf = CRF(
@@ -106,7 +105,7 @@ class BertLSTMModel(nn.Module):
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
-            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                          config=config)
         self.lstm = nn.LSTM(
             self.num_tags, self.num_tags, 2, batch_first=True, bidirectional=True,
@@ -156,7 +155,7 @@ class ModelForTetratagging(nn.Module):
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
-            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                          config=config)
 
     def forward(
