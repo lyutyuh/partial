@@ -180,7 +180,7 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path, is_eng)
     elif model_type == BERTLSTM:
         model = BertLSTMModel(config=config)
     elif model_type == BERT:
-        model = ModelForTetratagging.from_pretrained(model_path, config=config)
+        model = ModelForTetratagging(config=config)
     else:
         logging.error("Invalid model type")
         return
