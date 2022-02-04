@@ -45,7 +45,6 @@ def ptb_unescape(sent):
 class TaggingDataset(torch.utils.data.Dataset):
     def __init__(self, split, tokenizer, tag_system, reader, device, is_tetratags=False, pad_to_len=None,
                  max_train_len=None):
-        assert split in ('train', 'dev', 'test')
         self.reader = reader
         self.trees = self.reader.parsed_sents(split)
         self.tokenizer = tokenizer
