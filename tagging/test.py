@@ -355,6 +355,24 @@ class TestSPMRL(unittest.TestCase):
             print(tagger.tree_to_tags_pipeline(trees[0]))
             print(tagger.tree_to_ids_pipeline(trees[0]))
 
+    def test_german_tagger(self):
+        import pickle
+        with open("../data/vocab/German-tetra.pkl", 'rb') as f:
+            tag_vocab = pickle.load(f)
+        tagger = BottomUpTetratagger(tag_vocab=tag_vocab, add_remove_top=True)
+        l = "German"
+        READER = BracketParseCorpusReader('../data/spmrl/',
+                                          [l + '.train', l + '.dev', l + '.test'])
+        trees = READER.parsed_sents(l + '.test')
+        tags = tagger.tree_to_tags_pipeline(trees[0])
+        print(tags)
+        print(len(tags))
+        print(len(trees[0].pos()))
+        tree_back = tagger.tags_to_tree_pipeline(tags, trees[0].pos())
+        self.assertEqual(trees[0], tree_back)
+
+
+
 
 
 

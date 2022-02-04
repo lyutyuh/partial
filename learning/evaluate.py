@@ -121,7 +121,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
     logging.warning("Number of binarization error: {}".format(c_err))
     # save_predictions(predicted_dev_trees, output_path + model_name + "_predictions.txt")
     # save_predictions(gold_dev_trees, output_path + model_name + "_gold.txt")
-    return evalb("EVALB/", gold_dev_trees, predicted_dev_trees)
+    return evalb("EVALB_SPMRL/", gold_dev_trees, predicted_dev_trees)
 
 
 def save_predictions(predicted_trees, file_path):
@@ -131,7 +131,7 @@ def save_predictions(predicted_trees, file_path):
 
 
 def evalb(evalb_dir, gold_trees, predicted_trees, ref_gold_path=None) -> ParseMetrics:
-    # Code from: https://github.com/mrdrozdov/self-attentive-parser-with-extra-features/blob/master/src/evaluate.py
+    # Code from: https://github.com/nikitakit/self-attentive-parser/blob/master/src/evaluate.py
     assert os.path.exists(evalb_dir)
     evalb_program_path = os.path.join(evalb_dir, "evalb")
     evalb_spmrl_program_path = os.path.join(evalb_dir, "evalb_spmrl")
