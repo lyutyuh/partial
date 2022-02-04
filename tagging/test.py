@@ -311,5 +311,52 @@ class TestSRTagger(unittest.TestCase):
         print(len(tagger.tag_vocab))
 
 
+class TestSPMRL(unittest.TestCase):
+    def test_reading_trees(self):
+        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish', 'Swedish']
+        for l in langs:
+            READER = BracketParseCorpusReader('../data/spmrl/', [l+'.train', l+'.dev', l+'.test'])
+            trees = READER.parsed_sents(l+'.test')
+            trees[0].pretty_print()
+
+    def test_tagging_bu_sr(self):
+        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
+                 'Swedish']
+        for l in langs:
+            READER = BracketParseCorpusReader('../data/spmrl/',
+                                              [l + '.train', l + '.dev', l + '.test'])
+            trees = READER.parsed_sents(l + '.test')
+            trees[0].pretty_print()
+            tagger = SRTaggerBottomUp(trees, add_remove_top=True)
+            print(tagger.tree_to_tags_pipeline(trees[0]))
+            print(tagger.tree_to_ids_pipeline(trees[0]))
+
+    def test_tagging_td_sr(self):
+        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
+                 'Swedish']
+        for l in langs:
+            READER = BracketParseCorpusReader('../data/spmrl/',
+                                              [l + '.train', l + '.dev', l + '.test'])
+            trees = READER.parsed_sents(l + '.test')
+            trees[0].pretty_print()
+            tagger = SRTaggerTopDown(trees, add_remove_top=True)
+            print(tagger.tree_to_tags_pipeline(trees[0]))
+            print(tagger.tree_to_ids_pipeline(trees[0]))
+
+    def test_tagging_tetra(self):
+        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
+                 'Swedish']
+        for l in langs:
+            READER = BracketParseCorpusReader('../data/spmrl/',
+                                              [l + '.train', l + '.dev', l + '.test'])
+            trees = READER.parsed_sents(l + '.test')
+            trees[0].pretty_print()
+            tagger = BottomUpTetratagger(trees, add_remove_top=True)
+            print(tagger.tree_to_tags_pipeline(trees[0]))
+            print(tagger.tree_to_ids_pipeline(trees[0]))
+
+
+
+
 if __name__ == '__main__':
     unittest.main()

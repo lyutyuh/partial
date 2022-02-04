@@ -1,7 +1,7 @@
 import torch
-import transformers
 from torch import nn
 from transformers import BertForTokenClassification
+from transformers import XLMRobertaForTokenClassification
 
 from learning.crf import CRF
 
@@ -42,8 +42,12 @@ class BertCRFModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+        if config.is_eng:
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
+        else:
+            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+                                                                         config=config)
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.crf = CRF(
             self.num_tags,
@@ -96,8 +100,12 @@ class BertLSTMModel(nn.Module):
         super().__init__()
         self.num_tags = config.task_specific_params['num_tags']
         self.model_path = config.task_specific_params['model_path']
-        self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+        if config.is_eng:
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
+        else:
+            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+                                                                         config=config)
         self.lstm = nn.LSTM(
             self.num_tags, self.num_tags, 2, batch_first=True, bidirectional=True,
         )
@@ -135,11 +143,18 @@ class BertLSTMModel(nn.Module):
         return loss, lstm_out
 
 
-class ModelForTetratagging(transformers.BertForTokenClassification):
+class ModelForTetratagging(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__()
         self.num_even_tags = config.task_specific_params['num_even_tags']
         self.num_odd_tags = config.task_specific_params['num_odd_tags']
+        self.model_path = config.task_specific_params['model_path']
+        if config.is_eng:
+            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+                                                                     config=config)
+        else:
+            self.bert = XLMRobertaForTokenClassification.from_pretrained(self.model_path,
+                                                                         config=config)
 
     def forward(
             self,
@@ -151,7 +166,7 @@ class ModelForTetratagging(transformers.BertForTokenClassification):
             output_attentions=None,
             output_hidden_states=None,
     ):
-        outputs = super().forward(
+        outputs = self.bert.forward(
             input_ids,
             attention_mask=attention_mask,
             head_mask=head_mask,

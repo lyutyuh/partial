@@ -14,21 +14,15 @@ from transformers import AdamW
 
 from learning.dataset import TaggingDataset
 from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
-from learning.model import ModelForTetratagging, BertCRFModel, BertLSTMModel
+from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
+from const import *
 
 logging.getLogger().setLevel(logging.INFO)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-reader = BracketParseCorpusReader('data', ['train', 'dev', 'test'])
-
-TETRATAGGER = "tetra"
-TD_SR = "td-sr"
-BU_SR = "bu-sr"
-BERT = "bert"
-BERTCRF = "bert+crf"
-BERTLSTM = "bert+lstm"
+DATA_PATH = "data/spmrl/"
 
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
@@ -38,20 +32,25 @@ vocab = subparser.add_parser('vocab')
 
 vocab.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
                    help="Tagging schema")
-vocab.add_argument('--output-path', choices=[TETRATAGGER, TD_SR, BU_SR], default="data/")
+vocab.add_argument('--lang', choices=LANG, default=ENG, help="Language")
+vocab.add_argument('--output-path', choices=[TETRATAGGER, TD_SR, BU_SR],
+                   default="data/vocab/")
 
 train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
                    help="Tagging schema")
-train.add_argument('--tag-vocab-path', type=str, default="data/")
+train.add_argument('--lang', choices=LANG, default=ENG, help="Language")
+train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
 train.add_argument('--model', choices=[BERT, BERTCRF, BERTLSTM], required=True,
                    help="Model architecture")
 
-train.add_argument('--model-path', type=str, default='distilbert',
-                   help="Bert model path or name")
+train.add_argument('--model-path', type=str, default='bertlarge',
+                   help="Bert model path or name, "
+                        "bert-large-cased for english and xlm-roberta-large for others")
 train.add_argument('--output-path', type=str, default='pat-models/',
                    help="Path to save trained models")
 train.add_argument('--use-tensorboard', type=bool, default=False,
-                   help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
+                   help="Whether to use the tensorboard for logging the results make sure to "
+                        "add credentials to run.py if set to true")
 
 train.add_argument('--max-depth', type=int, default=25,
                    help="Max stack depth used for decoding")
@@ -63,7 +62,8 @@ train.add_argument('--num-warmup-steps', type=int, default=160)
 train.add_argument('--weight-decay', type=float, default=0.01)
 
 evaluate.add_argument('--model-name', type=str, required=True)
-evaluate.add_argument('--tag-vocab-path', type=str, default="data/")
+evaluate.add_argument('--lang', choices=LANG, default=ENG, help="Language")
+evaluate.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
 evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
@@ -71,13 +71,14 @@ evaluate.add_argument('--batch-size', type=int, default=16)
 evaluate.add_argument('--max-depth', type=int, default=25,
                       help="Max stack depth used for decoding")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
-                      help="Whether to use the tensorboard for logging the results make sure to add credentials to run.py if set to true")
+                      help="Whether to use the tensorboard for logging the results make sure "
+                           "to add credentials to run.py if set to true")
 
 
-def initialize_tag_system(tagging_schema, tag_vocab_path=""):
+def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path=""):
     tag_vocab = None
     if tag_vocab_path != "":
-        with open(tag_vocab_path + tagging_schema + '.pkl', 'rb') as f:
+        with open(tag_vocab_path + lang + "-" + tagging_schema + '.pkl', 'rb') as f:
             tag_vocab = pickle.load(f)
     if tagging_schema == BU_SR:
         tag_system = SRTaggerBottomUp(trees=reader.parsed_sents('train'), tag_vocab=tag_vocab,
@@ -95,12 +96,14 @@ def initialize_tag_system(tagging_schema, tag_vocab_path=""):
 
 
 def save_vocab(args):
-    tag_system = initialize_tag_system(args.tagger)
-    with open(args.output_path + args.tagger + '.pkl', 'wb') as f:
+    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
+                                                  args.lang + '.test'])
+    tag_system = initialize_tag_system(reader, args.tagger, args.lang)
+    with open(args.output_path + args.lang + "-" + args.tagger + '.pkl', 'wb') as f:
         pickle.dump(tag_system.tag_vocab, f)
 
 
-def prepare_training_data(tag_system, tagging_schema, model_name, batch_size):
+def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_size):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
@@ -117,7 +120,7 @@ def prepare_training_data(tag_system, tagging_schema, model_name, batch_size):
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def prepare_test_data(tag_system, tagging_schema, model_name):
+def prepare_test_data(reader, tag_system, tagging_schema, model_name):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
@@ -129,7 +132,7 @@ def prepare_test_data(tag_system, tagging_schema, model_name):
     return test_dataset, test_dataloader
 
 
-def generate_config(model_type, tagging_schema, tag_system, model_path):
+def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
     if model_type == BERTCRF or model_type == BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
             model_path,
@@ -137,6 +140,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
             task_specific_params={
                 'model_path': model_path,
                 'num_tags': len(tag_system.tag_vocab),
+                'is_eng': is_eng,
             }
         )
     elif model_type == BERT and tagging_schema == TETRATAGGER:
@@ -149,6 +153,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
                 'model_path': model_path,
                 'num_even_tags': tag_system.decode_moderator.leaf_tag_vocab_size,
                 'num_odd_tags': tag_system.decode_moderator.internal_tag_vocab_size,
+                'is_eng': is_eng
             }
         )
     elif model_type == BERT and tagging_schema != TETRATAGGER:
@@ -159,6 +164,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
                 'model_path': model_path,
                 'num_even_tags': len(tag_system.tag_vocab),
                 'num_odd_tags': len(tag_system.tag_vocab),
+                'is_eng': is_eng
             }
         )
     else:
@@ -167,8 +173,8 @@ def generate_config(model_type, tagging_schema, tag_system, model_path):
     return config
 
 
-def initialize_model(model_type, tagging_schema, tag_system, model_path):
-    config = generate_config(model_type, tagging_schema, tag_system, model_path)
+def initialize_model(model_type, tagging_schema, tag_system, model_path, is_eng):
+    config = generate_config(model_type, tagging_schema, tag_system, model_path, is_eng)
     if model_type == BERTCRF:
         model = BertCRFModel(config=config)
     elif model_type == BERTLSTM:
@@ -203,20 +209,26 @@ def register_run_metrics(writer, run_name, lr, epochs, eval_loss, even_tag_accur
 
 
 def train(args):
+    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
+                                                  args.lang + '.test'])
     logging.info("Initializing Tag System")
-    tag_system = initialize_tag_system(args.tagger, args.tag_vocab_path)
+    tag_system = initialize_tag_system(reader, args.tagger, args.lang,
+                                       tag_vocab_path=args.tag_vocab_path)
     logging.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
+        reader,
         tag_system, args.tagger, args.model_path, args.batch_size)
     logging.info("Initializing The Model")
-    model = initialize_model(args.model, args.tagger, tag_system, args.model_path)
+    is_eng = True if args.lang == ENG else False
+    model = initialize_model(args.model, args.tagger, tag_system, args.model_path, is_eng)
+    train_set_size = len(train_dataloader)
     optimizer, scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
-                                                                                  len(train_dataloader),
+                                                                                  train_set_size,
                                                                                   args.lr,
                                                                                   args.epochs,
                                                                                   args.num_warmup_steps,
                                                                                   args.weight_decay)
-    run_name = args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
+    run_name = args.lang + "-" + args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
     writer = None
     if args.use_tensorboard:
         writer = SummaryWriter(comment=run_name)
@@ -272,9 +284,9 @@ def train(args):
 
                 if tol < 0:
                     _finish_training(model, tag_system, eval_dataloader,
-                                              eval_dataset, eval_loss, run_name, writer, args)
+                                     eval_dataset, eval_loss, run_name, writer, args)
                     return
-                if dev_metrics.fscore > 0: # not propagating the nan
+                if dev_metrics.fscore > 0:  # not propagating the nan
                     last_fscore = dev_metrics.fscore
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -286,7 +298,7 @@ def train(args):
             model.train()
 
     _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
-                              run_name, writer, args)
+                     run_name, writer, args)
 
 
 def _save_best_model(model, output_path, run_name):
@@ -295,8 +307,7 @@ def _save_best_model(model, output_path, run_name):
 
 
 def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
-                              run_name, writer, args):
-
+                     run_name, writer, args):
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, 16,
@@ -328,15 +339,19 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 
 
 def evaluate(args):
+    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
+                                                  args.lang + '.test'])
     tagging_schema, model_type = decode_model_name(args.model_name)
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
-    tag_system = initialize_tag_system(tagging_schema, args.tag_vocab_path)
+    tag_system = initialize_tag_system(reader, tagging_schema, args.tag_vocab_path)
     logging.info("Preparing Data")
-    eval_dataset, eval_dataloader = prepare_test_data(
-        tag_system, tagging_schema, args.bert_model_path)
+    eval_dataset, eval_dataloader = prepare_test_data(reader,
+                                                      tag_system, tagging_schema,
+                                                      args.bert_model_path)
 
-    model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path)
+    is_eng = True if args.lang == ENG else False
+    model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path, is_eng)
     model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
