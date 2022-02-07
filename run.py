@@ -115,20 +115,20 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
     )
     eval_dataloader = DataLoader(
-        eval_dataset, batch_size=16, collate_fn=eval_dataset.collate
-    )  # TODO: remove the constant batch size
+        eval_dataset, batch_size=batch_size, collate_fn=eval_dataset.collate
+    )
     return train_dataset, eval_dataset, train_dataloader, eval_dataloader
 
 
-def prepare_test_data(reader, tag_system, tagging_schema, model_name, lang):
+def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
     test_dataset = TaggingDataset(lang+'.test', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     test_dataloader = DataLoader(
-        test_dataset, batch_size=16, collate_fn=test_dataset.collate
-    )  # TODO: remove the constant batch size
+        test_dataset, batch_size=batch_size, collate_fn=test_dataset.collate
+    )
     return test_dataset, test_dataloader
 
 
@@ -249,6 +249,9 @@ def train(args):
     for _ in tq(range(args.epochs)):
         t = 0
         for batch in tq(train_dataloader):
+            optimizer.zero_grad()
+            model.train()
+
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
             loss = outputs[0]
@@ -256,10 +259,14 @@ def train(args):
             if args.use_tensorboard:
                 writer.add_scalar('Loss/train', torch.mean(loss), n_iter)
 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
             if t % when_to_eval == 0:
                 predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                                   num_tags, 16,
-                                                   device)  # TODO: remove the constant batch size
+                                                   num_tags, args.batch_size,
+                                                   device)
                 dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
                                               tag_system, None,
                                               "", args.max_depth)
@@ -272,9 +279,9 @@ def train(args):
                 logging.info("best fscore {}".format(best_fscore))
                 if dev_metrics.fscore > last_fscore:
                     tol = 3
-                    logging.info("CHECK! tol refill")
+                    logging.info("tol refill")
                     if dev_metrics.fscore > best_fscore:
-                        logging.info("CHECK! best model save")
+                        logging.info("save the best model")
                         best_fscore = dev_metrics.fscore
                         _save_best_model(model, args.output_path, run_name)
                 elif dev_metrics.fscore > 0:
@@ -289,13 +296,8 @@ def train(args):
                 if dev_metrics.fscore > 0:  # not propagating the nan
                     last_fscore = dev_metrics.fscore
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
             n_iter += 1
             t += 1
-            model.train()
 
     _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
                      run_name, writer, args)
