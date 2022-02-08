@@ -349,7 +349,8 @@ def evaluate(args):
     tagging_schema, model_type = decode_model_name(args.model_name, is_english=is_english)
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
-    tag_system = initialize_tag_system(reader, tagging_schema, args.tag_vocab_path)
+    tag_system = initialize_tag_system(reader, tagging_schema, args.lang,
+                                       tag_vocab_path=args.tag_vocab_path)
     logging.info("Preparing Data")
     eval_dataset, eval_dataloader = prepare_test_data(reader,
                                                       tag_system, tagging_schema,
