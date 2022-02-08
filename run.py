@@ -319,8 +319,10 @@ def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss
     register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
 
 
-def decode_model_name(model_name):
+def decode_model_name(model_name, is_english=False):
     name_chunks = model_name.split("-")
+    if not is_english:
+        name_chunks = name_chunks[1:]
     if name_chunks[0] == "td" or name_chunks[0] == "bu":
         tagging_schema = name_chunks[0] + "-" + name_chunks[1]
         model_type = name_chunks[2]
@@ -343,7 +345,8 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 def evaluate(args):
     reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
                                                   args.lang + '.test'])
-    tagging_schema, model_type = decode_model_name(args.model_name)
+    is_english = True if args.lang == ENG else False
+    tagging_schema, model_type = decode_model_name(args.model_name, is_english=is_english)
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, tagging_schema, args.tag_vocab_path)
