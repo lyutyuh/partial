@@ -351,6 +351,7 @@ def evaluate(args):
     eval_dataset, eval_dataloader = prepare_test_data(reader,
                                                       tag_system, tagging_schema,
                                                       args.bert_model_path,
+                                                      args.batch_size,
                                                       args.lang)
 
     is_eng = True if args.lang == ENG else False
