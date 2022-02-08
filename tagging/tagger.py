@@ -75,6 +75,7 @@ class Tagger(ABC):
             cut_off_tree = tree[0]
         else:
             cut_off_tree = tree
+
         cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
         cut_off_tree.chomsky_normal_form()
         ptree = PTree.convert(cut_off_tree)

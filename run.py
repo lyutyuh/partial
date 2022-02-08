@@ -75,20 +75,23 @@ evaluate.add_argument('--use-tensorboard', type=bool, default=False,
                            "to add credentials to run.py if set to true")
 
 
-def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path=""):
+def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path="",
+                          add_remove_top=False):
     tag_vocab = None
     if tag_vocab_path != "":
         with open(tag_vocab_path + lang + "-" + tagging_schema + '.pkl', 'rb') as f:
             tag_vocab = pickle.load(f)
     if tagging_schema == BU_SR:
-        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents(lang+'.train'), tag_vocab=tag_vocab,
-                                      add_remove_top=True)
+        tag_system = SRTaggerBottomUp(trees=reader.parsed_sents(lang + '.train'),
+                                      tag_vocab=tag_vocab,
+                                      add_remove_top=add_remove_top)
     elif tagging_schema == TD_SR:
-        tag_system = SRTaggerTopDown(trees=reader.parsed_sents(lang+'.train'), tag_vocab=tag_vocab,
-                                     add_remove_top=True)
+        tag_system = SRTaggerTopDown(trees=reader.parsed_sents(lang + '.train'),
+                                     tag_vocab=tag_vocab,
+                                     add_remove_top=add_remove_top)
     elif tagging_schema == TETRATAGGER:
-        tag_system = BottomUpTetratagger(trees=reader.parsed_sents(lang+'.train'),
-                                         tag_vocab=tag_vocab, add_remove_top=True)
+        tag_system = BottomUpTetratagger(trees=reader.parsed_sents(lang + '.train'),
+                                         tag_vocab=tag_vocab, add_remove_top=add_remove_top)
     else:
         logging.error("Please specify the tagging schema")
         return
@@ -98,7 +101,8 @@ def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path=""):
 def save_vocab(args):
     reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
                                                   args.lang + '.test'])
-    tag_system = initialize_tag_system(reader, args.tagger, args.lang)
+    tag_system = initialize_tag_system(reader, args.tagger, args.lang,
+                                       add_remove_top=args.lang == ENG)
     with open(args.output_path + args.lang + "-" + args.tagger + '.pkl', 'wb') as f:
         pickle.dump(tag_system.tag_vocab, f)
 
@@ -107,9 +111,9 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    train_dataset = TaggingDataset(lang+'.train', tokenizer, tag_system, reader, device,
+    train_dataset = TaggingDataset(lang + '.train', tokenizer, tag_system, reader, device,
                                    is_tetratags=is_tetratags)
-    eval_dataset = TaggingDataset(lang+'.dev', tokenizer, tag_system, reader, device,
+    eval_dataset = TaggingDataset(lang + '.dev', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
@@ -124,7 +128,7 @@ def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size
     is_tetratags = True if tagging_schema == TETRATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    test_dataset = TaggingDataset(lang+'.test', tokenizer, tag_system, reader, device,
+    test_dataset = TaggingDataset(lang + '.test', tokenizer, tag_system, reader, device,
                                   pad_to_len=256, is_tetratags=is_tetratags)
     test_dataloader = DataLoader(
         test_dataset, batch_size=batch_size, collate_fn=test_dataset.collate
@@ -213,7 +217,8 @@ def train(args):
                                                   args.lang + '.test'])
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, args.tagger, args.lang,
-                                       tag_vocab_path=args.tag_vocab_path)
+                                       tag_vocab_path=args.tag_vocab_path,
+                                       add_remove_top=args.lang == ENG)
     logging.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
         reader,
@@ -228,7 +233,8 @@ def train(args):
                                                                                   args.epochs,
                                                                                   args.num_warmup_steps,
                                                                                   args.weight_decay)
-    run_name = args.lang + "-" + args.tagger + "-" + args.model + "-" + str(args.lr) + "-" + str(args.epochs)
+    run_name = args.lang + "-" + args.tagger + "-" + args.model + "-" + str(
+        args.lr) + "-" + str(args.epochs)
     writer = None
     if args.use_tensorboard:
         writer = SummaryWriter(comment=run_name)
@@ -350,7 +356,8 @@ def evaluate(args):
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, tagging_schema, args.lang,
-                                       tag_vocab_path=args.tag_vocab_path)
+                                       tag_vocab_path=args.tag_vocab_path,
+                                       add_remove_top=args.lang == ENG)
     logging.info("Preparing Data")
     eval_dataset, eval_dataloader = prepare_test_data(reader,
                                                       tag_system, tagging_schema,
@@ -359,7 +366,8 @@ def evaluate(args):
                                                       args.lang)
 
     is_eng = True if args.lang == ENG else False
-    model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path, is_eng)
+    model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path,
+                             is_eng)
     model = torch.nn.DataParallel(model)
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
