@@ -313,7 +313,7 @@ class TestSRTagger(unittest.TestCase):
 
 class TestSPMRL(unittest.TestCase):
     def test_reading_trees(self):
-        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish', 'Swedish']
+        langs = ['Korean']
         for l in langs:
             READER = BracketParseCorpusReader('../data/spmrl/', [l+'.train', l+'.dev', l+'.test'])
             trees = READER.parsed_sents(l+'.test')
@@ -356,10 +356,6 @@ class TestSPMRL(unittest.TestCase):
             print(tagger.tree_to_ids_pipeline(trees[0]))
 
     def test_taggers(self):
-        # import pickle
-        # with open("../data/vocab/French-bu-sr.pkl", 'rb') as f:
-        #     tag_vocab = pickle.load(f)
-        from tree_tools import add_plus_to_tree, remove_plus_from_tree
         tagger = BottomUpTetratagger(add_remove_top=False)
         langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
                  'Swedish']
@@ -368,17 +364,23 @@ class TestSPMRL(unittest.TestCase):
                                               [l + '.train', l + '.dev', l + '.test'])
             trees = READER.parsed_sents(l + '.test')
             for tree in tq(trees):
-                remove_plus_from_tree(tree)
                 tags = tagger.tree_to_tags_pipeline(tree)
-                # print(len(trees[0].pos()))
-                # print(trees[0].pos())
                 tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
-                add_plus_to_tree(tree_back)
                 self.assertEqual(tree, tree_back)
 
-
-
-
+    def test_korean(self):
+        import pickle
+        with open("../data/vocab/Korean-td-sr.pkl", 'rb') as f:
+            tag_vocab = pickle.load(f)
+        tagger = SRTaggerTopDown(tag_vocab=tag_vocab, add_remove_top=False)
+        l = "Korean"
+        READER = BracketParseCorpusReader('../data/spmrl/',
+                                          [l + '.train', l + '.dev', l + '.test'])
+        trees = READER.parsed_sents(l + '.test')
+        for tree in tq(trees):
+            ids = tagger.tree_to_ids_pipeline(tree)
+            tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
+            self.assertEqual(tree, tree_back)
 
 
 if __name__ == '__main__':

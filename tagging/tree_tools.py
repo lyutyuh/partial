@@ -91,4 +91,4 @@ def add_plus_to_tree(tree):
     new_label = label.replace("@", "+")
     tree.set_label(new_label)
     for child in tree:
-        remove_plus_from_tree(child)
+        add_plus_to_tree(child)

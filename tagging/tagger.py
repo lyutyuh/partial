@@ -57,7 +57,10 @@ class Tagger(ABC):
         return res
 
     def tags_to_tree_pipeline(self, tags: [str], input_seq: []) -> Tree:
-        ptree = self.tags_to_tree(tags, input_seq)
+        filtered_input_seq = []
+        for token, pos in input_seq:
+            filtered_input_seq.append((token, pos.replace("+", "@")))
+        ptree = self.tags_to_tree(tags, filtered_input_seq)
         return self.postprocess(ptree)
 
     def ids_to_tree_pipeline(self, ids: [int], input_seq: []) -> Tree:
@@ -78,7 +81,7 @@ class Tagger(ABC):
         else:
             cut_off_tree = tree
 
-        remove_plus_from_tree(tree)
+        remove_plus_from_tree(cut_off_tree)
         cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
         cut_off_tree.chomsky_normal_form()
         ptree = PTree.convert(cut_off_tree)
