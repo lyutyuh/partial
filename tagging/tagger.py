@@ -4,6 +4,8 @@ from nltk import ParentedTree as PTree
 from nltk import Tree
 from tqdm import tqdm as tq
 
+from tree_tools import add_plus_to_tree, remove_plus_from_tree
+
 
 class TagDecodeModerator(ABC):
     def __init__(self, tag_vocab):
@@ -76,6 +78,7 @@ class Tagger(ABC):
         else:
             cut_off_tree = tree
 
+        remove_plus_from_tree(tree)
         cut_off_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
         cut_off_tree.chomsky_normal_form()
         ptree = PTree.convert(cut_off_tree)
@@ -84,6 +87,7 @@ class Tagger(ABC):
     def postprocess(self, tree: PTree) -> Tree:
         tree = Tree.convert(tree)
         tree.un_chomsky_normal_form()
+        add_plus_to_tree(tree)
         if self.add_remove_top:
             return Tree("TOP", [tree])
         else:

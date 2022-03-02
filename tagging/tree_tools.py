@@ -72,3 +72,23 @@ def create_dummy_tree(leaves):
         idx += 1
 
     return dummy_tree
+
+
+def remove_plus_from_tree(tree):
+    if type(tree) == str:
+        return
+    label = tree.label()
+    new_label = label.replace("+", "@")
+    tree.set_label(new_label)
+    for child in tree:
+        remove_plus_from_tree(child)
+
+
+def add_plus_to_tree(tree):
+    if type(tree) == str:
+        return
+    label = tree.label()
+    new_label = label.replace("@", "+")
+    tree.set_label(new_label)
+    for child in tree:
+        remove_plus_from_tree(child)

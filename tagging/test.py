@@ -355,22 +355,26 @@ class TestSPMRL(unittest.TestCase):
             print(tagger.tree_to_tags_pipeline(trees[0]))
             print(tagger.tree_to_ids_pipeline(trees[0]))
 
-    def test_german_tagger(self):
-        import pickle
-        with open("../data/vocab/German-bu-sr.pkl", 'rb') as f:
-            tag_vocab = pickle.load(f)
-        tagger = SRTaggerBottomUp(tag_vocab=tag_vocab, add_remove_top=False)
-        l = "German"
-        READER = BracketParseCorpusReader('../data/spmrl/',
-                                          [l + '.train', l + '.dev', l + '.test'])
-        trees = READER.parsed_sents(l + '.test')
-        tags = tagger.tree_to_tags_pipeline(trees[0])
-        print(tags)
-        print(len(tags))
-        print(len(trees[0].pos()))
-        print(trees[0].pos())
-        tree_back = tagger.tags_to_tree_pipeline(tags, trees[0].pos())
-        self.assertEqual(trees[0], tree_back)
+    def test_taggers(self):
+        # import pickle
+        # with open("../data/vocab/French-bu-sr.pkl", 'rb') as f:
+        #     tag_vocab = pickle.load(f)
+        from tree_tools import add_plus_to_tree, remove_plus_from_tree
+        tagger = BottomUpTetratagger(add_remove_top=False)
+        langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
+                 'Swedish']
+        for l in tq(langs):
+            READER = BracketParseCorpusReader('../data/spmrl/',
+                                              [l + '.train', l + '.dev', l + '.test'])
+            trees = READER.parsed_sents(l + '.test')
+            for tree in tq(trees):
+                remove_plus_from_tree(tree)
+                tags = tagger.tree_to_tags_pipeline(tree)
+                # print(len(trees[0].pos()))
+                # print(trees[0].pos())
+                tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
+                add_plus_to_tree(tree_back)
+                self.assertEqual(tree, tree_back)
 
 
 

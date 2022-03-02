@@ -117,11 +117,12 @@ class SRTagger(Tagger, ABC):
         self.label_vocab = sorted(self.label_vocab)
 
     @staticmethod
-    def create_shift_tag(label: str) -> str:
+    def create_shift_tag(label: str, is_right_child=False) -> str:
         if label.find("+") != -1:
-            return "s" + "/" + "/".join(label.split("+")[:-1])
+            tag = "s" + "/" + "/".join(label.split("+")[:-1])
         else:
-            return "s"
+            tag = "s"
+        return "s" + tag if is_right_child else tag
 
     @staticmethod
     def create_shift_label(tag: str) -> str:
@@ -157,7 +158,12 @@ class SRTaggerBottomUp(SRTagger):
     def tree_to_tags(self, root: PTree) -> [str]:
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
-        tags.append(self.create_shift_tag(lc.label()))
+        if len(root) == 1: #edge case
+            tags.append(self.create_shift_tag(lc.label(), False))
+            return tags
+
+        parent_is_right = lc.parent().left_sibling() is not None
+        tags.append(self.create_shift_tag(lc.label(), parent_is_right))
 
         logging.debug("SHIFT {}".format(lc.label()))
         stack = [lc]
@@ -169,7 +175,8 @@ class SRTaggerBottomUp(SRTagger):
                 lc = LeftCornerTransformer.extract_left_corner_no_eps(node.right_sibling())
                 stack.append(lc)
                 logging.debug("SHIFT {}".format(lc.label()))
-                tags.append(self.create_shift_tag(lc.label()))
+                parent_is_right = lc.parent().left_sibling() is not None
+                tags.append(self.create_shift_tag(lc.label(), parent_is_right))
 
             elif len(stack) >= 2 and (
                     node.right_sibling() == stack[-2] or node.left_sibling() == stack[-2]):
