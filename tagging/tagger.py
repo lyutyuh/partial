@@ -4,7 +4,7 @@ from nltk import ParentedTree as PTree
 from nltk import Tree
 from tqdm import tqdm as tq
 
-from tree_tools import add_plus_to_tree, remove_plus_from_tree
+from tagging.tree_tools import add_plus_to_tree, remove_plus_from_tree
 
 
 class TagDecodeModerator(ABC):
