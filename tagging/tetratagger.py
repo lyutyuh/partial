@@ -181,15 +181,17 @@ class BottomUpTetratagger(TetraTagger):
         RightCornerTransformer.transform(tree_rc, ptree, ptree)
         return tree_rc
 
-    def tree_to_tags(self, root: PTree) -> []:
+    def tree_to_tags(self, root: PTree) -> ([], int):
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
         tags.append(self.create_shift_tag(lc.label(), "l"))
 
         logging.debug("SHIFT {}".format(lc.label()))
         stack = [lc]
+        max_stack_len = 1
 
         while len(stack) > 0:
+            max_stack_len = max(max_stack_len, len(stack))
             node = stack[-1]
             if find_node_type(
                     node) == NodeType.NT:  # special case: merge the reduce and last shift
@@ -235,7 +237,7 @@ class BottomUpTetratagger(TetraTagger):
                 logging.error("ERROR: Undefined stack state")
                 return
         logging.debug("=" * 20)
-        return tags
+        return tags, max_stack_len
 
     def _unary_reduce(self, node, last_node, tag):
         label = self._create_unary_reduce_label(tag)
@@ -308,12 +310,14 @@ class TopDownTetratagger(TetraTagger):
         LeftCornerTransformer.transform(tree_lc, ptree, ptree)
         return tree_lc
 
-    def tree_to_tags(self, root: PTree) -> [str]:
+    def tree_to_tags(self, root: PTree) -> ([str], int):
         """ convert left-corner transformed tree to shifts and reduces """
         stack: [PTree] = [root]
+        max_stack_len = 1
         logging.debug("SHIFT {}".format(root.label()))
         tags = []
         while len(stack) > 0:
+            max_stack_len = max(max_stack_len, len(stack))
             node = stack[-1]
             if find_node_type(node) == NodeType.NT or find_node_type(node) == NodeType.NT_NT:
                 stack.pop()
@@ -339,7 +343,7 @@ class TopDownTetratagger(TetraTagger):
                 tags.append(self.create_shift_tag(node.label(), "r"))  # normal shift
                 logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
                 stack.pop()
-        return tags
+        return tags, max_stack_len
 
     def postprocess(self, transformed_tree: PTree) -> Tree:
         ptree = PTree("X", ["", ""])

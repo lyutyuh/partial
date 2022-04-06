@@ -106,7 +106,7 @@ class SRTagger(Tagger, ABC):
     def add_trees_to_vocab(self, trees: []) -> None:
         self.label_vocab = set()
         for tree in tq(trees):
-            for tag in self.tree_to_tags_pipeline(tree):
+            for tag in self.tree_to_tags_pipeline(tree)[0]:
                 self.tag_vocab.add(tag)
                 idx = tag.find("/")
                 if idx != -1:
@@ -155,21 +155,23 @@ class SRTaggerBottomUp(SRTagger):
         super().__init__(trees, tag_vocab, add_remove_top)
         self.decode_moderator = BUSRTagDecodeModerator(self.tag_vocab)
 
-    def tree_to_tags(self, root: PTree) -> [str]:
+    def tree_to_tags(self, root: PTree) -> ([str], int):
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
         if len(root) == 1: #edge case
             tags.append(self.create_shift_tag(lc.label(), False))
-            return tags
+            return tags, 1
 
         parent_is_right = lc.parent().left_sibling() is not None
         tags.append(self.create_shift_tag(lc.label(), parent_is_right))
 
         logging.debug("SHIFT {}".format(lc.label()))
         stack = [lc]
+        max_stack_len = 1
 
         while len(stack) > 0:
             node = stack[-1]
+            max_stack_len = max(max_stack_len, len(stack))
 
             if node.left_sibling() is None and node.right_sibling() is not None:
                 lc = LeftCornerTransformer.extract_left_corner_no_eps(node.right_sibling())
@@ -193,7 +195,7 @@ class SRTaggerBottomUp(SRTagger):
             elif stack[0].parent() is None and len(stack) == 1:
                 stack.pop()
                 continue
-        return tags
+        return tags, max_stack_len
 
     def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
         created_node_stack = []
@@ -252,12 +254,14 @@ class SRTaggerTopDown(SRTagger):
         super().__init__(trees, tag_vocab, add_remove_top)
         self.decode_moderator = TDSRTagDecodeModerator(self.tag_vocab)
 
-    def tree_to_tags(self, root: PTree) -> [str]:
+    def tree_to_tags(self, root: PTree) -> ([str], int):
         stack: [PTree] = [root]
+        max_stack_len = 1
         tags = []
 
         while len(stack) > 0:
             node = stack[-1]
+            max_stack_len = max(max_stack_len, len(stack))
 
             if find_node_type(node) == NodeType.NT:
                 stack.pop()
@@ -273,7 +277,7 @@ class SRTaggerTopDown(SRTagger):
                 tags.append(self.create_shift_tag(node.label()))
                 stack.pop()
 
-        return tags
+        return tags, max_stack_len
 
     def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
         if len(tags) == 1:  # base case

@@ -136,7 +136,7 @@ class TestPipeline(unittest.TestCase):
         example_tree = Tree.fromstring(
             "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
         tagger = BottomUpTetratagger()
-        tags = tagger.tree_to_tags_pipeline(example_tree)
+        tags = tagger.tree_to_tags_pipeline(example_tree)[0]
         print(tags)
         for tag in tagger.tetra_visualize(tags):
             print(tag)
@@ -163,7 +163,7 @@ class TestPipeline(unittest.TestCase):
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
             # original_tags = TetraTagSequence.from_tree(original_tree)
-            tags = tagger.tree_to_tags_pipeline(tree)
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
             tetratags = tetratagger.tags_from_tree(tree)
             # ids = tagger.tree_to_ids_pipeline(tree)
             # ids = tagger.ids_from_tree(tree)
@@ -176,18 +176,18 @@ class TestPipeline(unittest.TestCase):
             "(S (NP (PRP She)) (VP (VBZ enjoys) (S (VP (VBG playing) (NP (NN tennis))))) (. .))")
         original_tree = example_tree.copy(deep=True)
         tagger = TopDownTetratagger()
-        tags = tagger.tree_to_tags_pipeline(example_tree)
+        tags = tagger.tree_to_tags_pipeline(example_tree)[0]
         tree_back = tagger.tags_to_tree_pipeline(tags, example_tree.pos())
         tree_back.pretty_print()
         self.assertEqual(original_tree, tree_back)
 
     def test_top_down_tetratagger(self):
-        READER = BracketParseCorpusReader('../data', ['train', 'dev', ' test'])
-        trees = READER.parsed_sents('test')
+        READER = BracketParseCorpusReader('../data/spmrl/', ['English.train', 'English.dev', 'English.test'])
+        trees = READER.parsed_sents('English.test')
         tagger = TopDownTetratagger(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            tags = tagger.tree_to_tags_pipeline(tree)
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
             tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
@@ -218,8 +218,8 @@ class TestPipeline(unittest.TestCase):
         tagger_td = TopDownTetratagger(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            tags_bu = tagger_bu.tree_to_tags_pipeline(tree)
-            tags_td = tagger_td.tree_to_tags_pipeline(original_tree)
+            tags_bu = tagger_bu.tree_to_tags_pipeline(tree)[0]
+            tags_td = tagger_td.tree_to_tags_pipeline(original_tree)[0]
             print(tags_bu)
             print(tags_td)
             print("=" * 20)
@@ -232,7 +232,7 @@ class TestSRTagger(unittest.TestCase):
         tagger = SRTaggerBottomUp(add_remove_top=True)
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            tags = tagger.tree_to_tags_pipeline(tree)
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
             for tag in tags:
                 if tag.find('/X/') != -1:
                     print(tag)
@@ -249,8 +249,8 @@ class TestSRTagger(unittest.TestCase):
         bu_tagger = SRTaggerBottomUp(add_remove_top=True)
         t1 = example_tree.copy(deep=True)
         t2 = example_tree.copy(deep=True)
-        td_tags = td_tagger.tree_to_tags_pipeline(t1)
-        bu_tags = bu_tagger.tree_to_tags_pipeline(t2)
+        td_tags = td_tagger.tree_to_tags_pipeline(t1)[0]
+        bu_tags = bu_tagger.tree_to_tags_pipeline(t2)[0]
         self.assertEqual(set(td_tags), set(bu_tags))
         print(list(td_tags))
         print(list(bu_tags))
@@ -260,7 +260,7 @@ class TestSRTagger(unittest.TestCase):
         trees = READER.parsed_sents('dev')
         tagger = SRTaggerBottomUp(add_remove_top=True)
         for tree in tq(trees):
-            tags = tagger.tree_to_tags_pipeline(tree)
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
             for idx, tag in enumerate(tags):
                 if tag.startswith("rr"):
                     if (idx + 1) < len(tags):
@@ -274,7 +274,7 @@ class TestSRTagger(unittest.TestCase):
         trees = READER.parsed_sents('dev')
         tagger = SRTaggerTopDown(add_remove_top=True)
         for tree in tq(trees):
-            tags = tagger.tree_to_tags_pipeline(tree)
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
             for idx, tag in enumerate(tags):
                 if tag.startswith("s"):
                     if (idx + 1) < len(tags):
@@ -291,8 +291,8 @@ class TestSRTagger(unittest.TestCase):
         bu_tagger = SRTaggerBottomUp(add_remove_top=True)
 
         for tree in tq(trees):
-            td_tags = td_tagger.tree_to_tags_pipeline(tree)
-            bu_tags = bu_tagger.tree_to_tags_pipeline(tree)
+            td_tags = td_tagger.tree_to_tags_pipeline(tree)[0]
+            bu_tags = bu_tagger.tree_to_tags_pipeline(tree)[0]
             self.assertEqual(set(td_tags), set(bu_tags))
 
     def test_tag_ids(self):
@@ -356,7 +356,7 @@ class TestSPMRL(unittest.TestCase):
             print(tagger.tree_to_ids_pipeline(trees[0]))
 
     def test_taggers(self):
-        tagger = BottomUpTetratagger(add_remove_top=False)
+        tagger = SRTaggerBottomUp(add_remove_top=False)
         langs = ['Basque', 'French', 'German', 'Hebrew', 'Hungarian', 'Korean', 'Polish',
                  'Swedish']
         for l in tq(langs):
@@ -370,17 +370,32 @@ class TestSPMRL(unittest.TestCase):
 
     def test_korean(self):
         import pickle
-        with open("../data/vocab/Korean-td-sr.pkl", 'rb') as f:
+        with open("../data/vocab/Korean-bu-sr.pkl", 'rb') as f:
             tag_vocab = pickle.load(f)
-        tagger = SRTaggerTopDown(tag_vocab=tag_vocab, add_remove_top=False)
+        tagger = SRTaggerBottomUp(tag_vocab=tag_vocab, add_remove_top=False)
         l = "Korean"
         READER = BracketParseCorpusReader('../data/spmrl/',
                                           [l + '.train', l + '.dev', l + '.test'])
         trees = READER.parsed_sents(l + '.test')
         for tree in tq(trees):
-            ids = tagger.tree_to_ids_pipeline(tree)
-            tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
+            tags = tagger.tree_to_tags_pipeline(tree)[0]
+            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             self.assertEqual(tree, tree_back)
+
+class TestStackSize(unittest.TestCase):
+    def test_english_tetra(self):
+        l = "English"
+        READER = BracketParseCorpusReader('../data/spmrl', [l+'.train', l+'.dev', l+'.test'])
+        trees = READER.parsed_sents([l+'.train', l+'.dev', l+'.test'])
+        tagger = BottomUpTetratagger(add_remove_top=True)
+        stack_size_list = []
+        for tree in tq(trees):
+            tags, max_depth = tagger.tree_to_tags_pipeline(tree)
+            stack_size_list.append(max_depth)
+
+        print(stack_size_list)
+
+
 
 
 if __name__ == '__main__':

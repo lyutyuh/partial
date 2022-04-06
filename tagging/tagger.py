@@ -28,7 +28,7 @@ class Tagger(ABC):
 
     def add_trees_to_vocab(self, trees: []) -> None:
         for tree in tq(trees):
-            tags = self.tree_to_tags_pipeline(tree)
+            tags = self.tree_to_tags_pipeline(tree)[0]
             for tag in tags:
                 self.tag_vocab.add(tag)
         self.tag_vocab = sorted(self.tag_vocab)
@@ -39,12 +39,12 @@ class Tagger(ABC):
     def tags_to_tree(self, tags: [str], input_seq: [str]) -> PTree:
         raise NotImplementedError("tags to tree is not implemented")
 
-    def tree_to_tags_pipeline(self, tree: Tree) -> [str]:
+    def tree_to_tags_pipeline(self, tree: Tree) -> ([str], int):
         ptree = self.preprocess(tree)
         return self.tree_to_tags(ptree)
 
     def tree_to_ids_pipeline(self, tree: Tree) -> [int]:
-        tags = self.tree_to_tags_pipeline(tree)
+        tags = self.tree_to_tags_pipeline(tree)[0]
         res = []
         for tag in tags:
             if tag in self.tag_vocab:
