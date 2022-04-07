@@ -18,8 +18,13 @@ class SRTagDecodeModerator(TagDecodeModerator, ABC):
         super().__init__(tag_vocab)
         self.reduce_tag_size = len([tag for tag in tag_vocab if tag.startswith("r")])
         self.shift_tag_size = len([tag for tag in tag_vocab if tag.startswith("s")])
+
         self.rr_tag_size = len([tag for tag in tag_vocab if tag.startswith("rr")])
-        self.lr_tag_size = self.reduce_tag_size - self.rr_tag_size
+        self.sr_tag_size = len([tag for tag in tag_vocab if tag.startswith("sr")])
+
+        self.rl_tag_size = self.reduce_tag_size - self.rr_tag_size
+        self.sl_tag_size = self.shift_tag_size - self.sr_tag_size
+
         self.mask_binarize = True
 
     def mask_scores_for_binarization(self, labels, scores) -> []:
@@ -32,8 +37,6 @@ class BUSRTagDecodeModerator(SRTagDecodeModerator):
         for i, tag in enumerate(tag_vocab):
             if tag.startswith("s"):
                 stack_depth_change_by_id[i] = +1
-            elif tag.startswith("rr"):
-                stack_depth_change_by_id[i] = -1
             elif tag.startswith("r"):
                 stack_depth_change_by_id[i] = -1
         assert None not in stack_depth_change_by_id
@@ -46,12 +49,17 @@ class BUSRTagDecodeModerator(SRTagDecodeModerator):
         self.shift_only_mask[-self.shift_tag_size:] = 0.0
 
     def mask_scores_for_binarization(self, labels, scores) -> []:
-        # after rr -> only reduce, after lr -> only shift
+        # after rr(right) -> only reduce, after rl(left) -> only shift
+        # after sr(right) -> only reduce, after sl(left) -> only shift
         mask1 = np.where(
-            (labels[:, None] >= self.lr_tag_size) & (labels[:, None] < self.reduce_tag_size),
+            (labels[:, None] >= self.rl_tag_size) & (labels[:, None] < self.reduce_tag_size),
             self.reduce_only_mask, 0.0)
-        mask2 = np.where(labels[:, None] < self.lr_tag_size, self.shift_only_mask, 0.0)
-        all_new_scores = scores + mask1 + mask2
+        mask2 = np.where(labels[:, None] < self.rl_tag_size, self.shift_only_mask, 0.0)
+        mask3 = np.where(
+            (labels[:, None] >= self.sl_tag_size) & (labels[:, None] < self.shift_tag_size),
+            self.reduce_only_mask, 0.0)
+        mask4 = np.where(labels[:, None] < self.sl_tag_size, self.shift_only_mask, 0.0)
+        all_new_scores = scores + mask1 + mask2 + mask3 + mask4
         return all_new_scores
 
 
@@ -84,17 +92,19 @@ class TDSRTagDecodeModerator(SRTagDecodeModerator):
         self._initialize_binarize_mask(tag_vocab)
 
     def _initialize_binarize_mask(self, tag_vocab) -> None:
-        self.not_rr_mask = np.full((len(tag_vocab),), -np.inf)
-        self.not_lr_mask = np.full((len(tag_vocab),), -np.inf)
-        self.not_rr_mask[-self.shift_tag_size:] = 0.0
-        self.not_rr_mask[:self.lr_tag_size] = 0.0
-        self.not_lr_mask[self.lr_tag_size:] = 0.0
+        self.right_only_mask = np.full((len(tag_vocab),), -np.inf)
+        self.left_only_mask = np.full((len(tag_vocab),), -np.inf)
+
+        self.right_only_mask[self.rl_tag_size:self.reduce_tag_size] = 0.0
+        self.right_only_mask[-self.sr_tag_size:] = 0.0
+
+        self.left_only_mask[:self.rl_tag_size] = 0.0
+        self.left_only_mask[self.reduce_tag_size:self.reduce_tag_size+self.sl_tag_size] = 0.0
 
     def mask_scores_for_binarization(self, labels, scores) -> []:
-        # before rr -> only shift, before lr -> only reduce
-        # so: if shift -> not lr and if reduce -> not rr
-        mask1 = np.where(labels[:, None] >= self.reduce_tag_size, self.not_lr_mask, 0.0)
-        mask2 = np.where(labels[:, None] < self.reduce_tag_size, self.not_rr_mask, 0.0)
+        # if shift -> rr and sr, if reduce -> rl and sl
+        mask1 = np.where(labels[:, None] >= self.reduce_tag_size, self.right_only_mask, 0.0)
+        mask2 = np.where(labels[:, None] < self.reduce_tag_size, self.left_only_mask, 0.0)
         all_new_scores = scores + mask1 + mask2
         return all_new_scores
 
@@ -118,11 +128,12 @@ class SRTagger(Tagger, ABC):
 
     @staticmethod
     def create_shift_tag(label: str, is_right_child=False) -> str:
+        suffix = "r" if is_right_child else ""
         if label.find("+") != -1:
-            tag = "s" + "/" + "/".join(label.split("+")[:-1])
+            tag = "s" + suffix + "/" + "/".join(label.split("+")[:-1])
         else:
-            tag = "s"
-        return "s" + tag if is_right_child else tag
+            tag = "s" + suffix
+        return tag
 
     @staticmethod
     def create_shift_label(tag: str) -> str:
@@ -162,8 +173,8 @@ class SRTaggerBottomUp(SRTagger):
             tags.append(self.create_shift_tag(lc.label(), False))
             return tags, 1
 
-        parent_is_right = lc.parent().left_sibling() is not None
-        tags.append(self.create_shift_tag(lc.label(), parent_is_right))
+        is_right_child = lc.left_sibling() is not None
+        tags.append(self.create_shift_tag(lc.label(), is_right_child))
 
         logging.debug("SHIFT {}".format(lc.label()))
         stack = [lc]
@@ -177,8 +188,8 @@ class SRTaggerBottomUp(SRTagger):
                 lc = LeftCornerTransformer.extract_left_corner_no_eps(node.right_sibling())
                 stack.append(lc)
                 logging.debug("SHIFT {}".format(lc.label()))
-                parent_is_right = lc.parent().left_sibling() is not None
-                tags.append(self.create_shift_tag(lc.label(), parent_is_right))
+                is_right_child = lc.left_sibling() is not None
+                tags.append(self.create_shift_tag(lc.label(), is_right_child))
 
             elif len(stack) >= 2 and (
                     node.right_sibling() == stack[-2] or node.left_sibling() == stack[-2]):
@@ -274,7 +285,8 @@ class SRTaggerTopDown(SRTagger):
 
             else:
                 logging.debug("-->\tSHIFT[ {0} ]".format(node.label()))
-                tags.append(self.create_shift_tag(node.label()))
+                is_right_node = node.left_sibling() is not None
+                tags.append(self.create_shift_tag(node.label(), is_right_node))
                 stack.pop()
 
         return tags, max_stack_len

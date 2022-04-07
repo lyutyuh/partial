@@ -2,22 +2,20 @@ import argparse
 import logging
 import pickle
 
-import numpy as np
-from torch.utils.tensorboard import SummaryWriter
-
 import torch
 import transformers
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm as tq
 from transformers import AdamW
 
+from const import *
 from learning.dataset import TaggingDataset
-from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
+from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy
 from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
-from const import *
 
 logging.getLogger().setLevel(logging.INFO)
 
