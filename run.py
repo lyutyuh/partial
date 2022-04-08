@@ -325,6 +325,7 @@ def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss
 
 def decode_model_name(model_name):
     name_chunks = model_name.split("-")
+    name_chunks = name_chunks[1:]
     if name_chunks[0] == "td" or name_chunks[0] == "bu":
         tagging_schema = name_chunks[0] + "-" + name_chunks[1]
         model_type = name_chunks[2]
