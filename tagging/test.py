@@ -298,8 +298,8 @@ class TestSRTagger(unittest.TestCase):
 
     def test_tag_ids(self):
         READER = BracketParseCorpusReader('../data/spmrl/', ['English.train', 'English.dev', 'English.test'])
-        trees = READER.parsed_sents('English.dev')
-        tagger = SRTaggerBottomUp(trees, add_remove_top=True)
+        trees = READER.parsed_sents('English.train')
+        tagger = SRTaggerBottomUp(trees, add_remove_top=False)
         for tree in tq(trees):
             ids = tagger.tree_to_ids_pipeline(tree)
             tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
