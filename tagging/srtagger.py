@@ -30,6 +30,7 @@ class SRTagDecodeModerator(TagDecodeModerator, ABC):
     def mask_scores_for_binarization(self, labels, scores) -> []:
         raise NotImplementedError
 
+
 class BUSRTagDecodeModerator(SRTagDecodeModerator):
     def __init__(self, tag_vocab):
         super().__init__(tag_vocab)
@@ -56,9 +57,11 @@ class BUSRTagDecodeModerator(SRTagDecodeModerator):
             self.reduce_only_mask, 0.0)
         mask2 = np.where(labels[:, None] < self.rl_tag_size, self.shift_only_mask, 0.0)
         mask3 = np.where(
-            (labels[:, None] >= self.sl_tag_size) & (labels[:, None] < self.shift_tag_size),
+            labels[:, None] >= (self.sl_tag_size + self.reduce_tag_size),
             self.reduce_only_mask, 0.0)
-        mask4 = np.where(labels[:, None] < self.sl_tag_size, self.shift_only_mask, 0.0)
+        mask4 = np.where((labels[:, None] >= self.reduce_tag_size) & (
+                    labels[:, None] < self.sl_tag_size + self.reduce_tag_size),
+                         self.shift_only_mask, 0.0)
         all_new_scores = scores + mask1 + mask2 + mask3 + mask4
         return all_new_scores
 
@@ -99,7 +102,8 @@ class TDSRTagDecodeModerator(SRTagDecodeModerator):
         self.right_only_mask[-self.sr_tag_size:] = 0.0
 
         self.left_only_mask[:self.rl_tag_size] = 0.0
-        self.left_only_mask[self.reduce_tag_size:self.reduce_tag_size+self.sl_tag_size] = 0.0
+        self.left_only_mask[
+        self.reduce_tag_size:self.reduce_tag_size + self.sl_tag_size] = 0.0
 
     def mask_scores_for_binarization(self, labels, scores) -> []:
         # if shift -> rr and sr, if reduce -> rl and sl
@@ -169,7 +173,7 @@ class SRTaggerBottomUp(SRTagger):
     def tree_to_tags(self, root: PTree) -> ([str], int):
         tags = []
         lc = LeftCornerTransformer.extract_left_corner_no_eps(root)
-        if len(root) == 1: #edge case
+        if len(root) == 1:  # edge case
             tags.append(self.create_shift_tag(lc.label(), False))
             return tags, 1
 
@@ -348,8 +352,9 @@ class SRTaggerTopDown(SRTagger):
             if idx == seq_len:
                 is_last = True
             if last_t is None:
-                beam_search.advance(logits[t, -len(self.tag_vocab):] + self.decode_moderator.reduce_tags_only,
-                                    is_last=is_last)
+                beam_search.advance(
+                    logits[t, -len(self.tag_vocab):] + self.decode_moderator.reduce_tags_only,
+                    is_last=is_last)
             else:
                 beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)
             last_t = t
