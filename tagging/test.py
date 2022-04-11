@@ -213,18 +213,27 @@ class TestPipeline(unittest.TestCase):
             tree_back = tagger.ids_to_tree_pipeline(ids, tree.pos())
             self.assertEqual(original_tree, tree_back)
 
-    def compare_top_down_bottom_up_tags(self):
+    def test_decoder_edges(self):
         READER = BracketParseCorpusReader('../data/spmrl/', ['English.train', 'English.dev', 'English.test'])
         trees = READER.parsed_sents('English.test')
-        tagger_bu = BottomUpTetratagger(add_remove_top=True)
-        tagger_td = TopDownTetratagger(add_remove_top=True)
+        tagger_bu = SRTaggerBottomUp(add_remove_top=True)
+        tagger_td = SRTaggerTopDown(add_remove_top=True)
+        unique_tags = dict()
+        counter = 0
         for tree in tq(trees):
-            original_tree = tree.copy(deep=True)
-            tags_bu = tagger_bu.tree_to_tags_pipeline(tree)[0]
-            tags_td = tagger_td.tree_to_tags_pipeline(original_tree)[0]
-            print(tags_bu)
-            print(tags_td)
-            print("=" * 20)
+            counter += 1
+            tags = tagger_td.tree_to_tags_pipeline(tree)[0]
+            for i, tag in enumerate(tags):
+                tag_s = tag.split("/")[0]
+                if i < len(tags) - 1:
+                    tag_next = tags[i+1].split("/")[0]
+                else:
+                    tag_next = None
+                if tag_s not in unique_tags and tag_next is not None:
+                    unique_tags[tag_s] = {tag_next}
+                elif tag_next is not None:
+                    unique_tags[tag_s].add(tag_next)
+        print(unique_tags)
 
 
 class TestSRTagger(unittest.TestCase):

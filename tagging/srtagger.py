@@ -22,8 +22,8 @@ class SRTagDecodeModerator(TagDecodeModerator, ABC):
         self.rr_tag_size = len([tag for tag in tag_vocab if tag.startswith("rr")])
         self.sr_tag_size = len([tag for tag in tag_vocab if tag.startswith("sr")])
 
-        self.rl_tag_size = self.reduce_tag_size - self.rr_tag_size
-        self.sl_tag_size = self.shift_tag_size - self.sr_tag_size
+        self.rl_tag_size = self.reduce_tag_size - self.rr_tag_size  # left reduce tag size
+        self.sl_tag_size = self.shift_tag_size - self.sr_tag_size  # left shift tag size
 
         self.mask_binarize = True
 
@@ -60,7 +60,7 @@ class BUSRTagDecodeModerator(SRTagDecodeModerator):
             labels[:, None] >= (self.sl_tag_size + self.reduce_tag_size),
             self.reduce_only_mask, 0.0)
         mask4 = np.where((labels[:, None] >= self.reduce_tag_size) & (
-                    labels[:, None] < self.sl_tag_size + self.reduce_tag_size),
+                labels[:, None] < (self.sl_tag_size + self.reduce_tag_size)),
                          self.shift_only_mask, 0.0)
         all_new_scores = scores + mask1 + mask2 + mask3 + mask4
         return all_new_scores

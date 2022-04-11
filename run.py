@@ -41,6 +41,7 @@ train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
 train.add_argument('--model', choices=[BERT, BERTCRF, BERTLSTM], required=True,
                    help="Model architecture")
 
+
 train.add_argument('--model-path', type=str, default='bertlarge',
                    help="Bert model path or name, "
                         "bert-large-cased for english and xlm-roberta-large for others")
