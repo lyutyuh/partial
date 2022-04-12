@@ -249,7 +249,7 @@ def train(args):
     eval_loss = 0
     last_fscore = 0
     best_fscore = 0
-    tol = 3
+    tol = 5
 
     for _ in tq(range(args.epochs)):
         t = 0
@@ -283,7 +283,7 @@ def train(args):
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
                 if dev_metrics.fscore > last_fscore:
-                    tol = 3
+                    tol = 5
                     logging.info("tol refill")
                     if dev_metrics.fscore > best_fscore:
                         logging.info("save the best model")
