@@ -64,7 +64,7 @@ evaluate.add_argument('--model-name', type=str, required=True)
 evaluate.add_argument('--lang', choices=LANG, default=ENG, help="Language")
 evaluate.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
 evaluate.add_argument('--model-path', type=str, default='pat-models/')
-evaluate.add_argument('--bert-model-path', type=str, default='distilbert/')
+evaluate.add_argument('--bert-model-path', type=str, default='mbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
 evaluate.add_argument('--max-depth', type=int, default=25,

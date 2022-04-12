@@ -19,14 +19,14 @@ class BeamSearch:
             initial_stack_depth,
             max_depth=12,
             min_depth=1,
-            keep_per_depth=1,
+            keep_per_depth=5,
             crf_transitions=None,
             initial_label=None,
     ):
         # Save parameters
         self.tag_moderator = tag_moderator
         self.valid_depths = np.arange(min_depth, max_depth)
-        self.keep_per_depth = keep_per_depth
+        self.keep_per_depth = 5  # TODO: add it to the parameter set
         self.max_depth = max_depth
         self.crf_transitions = crf_transitions
 
@@ -72,7 +72,8 @@ class BeamSearch:
         all_new_scores = self.compute_new_scores(label_log_probs, is_last)
         if self.tag_moderator.mask_binarize and self.beam.labels is not None:
             labels = self.beam.labels
-            all_new_scores = self.tag_moderator.mask_scores_for_binarization(labels, all_new_scores)
+            all_new_scores = self.tag_moderator.mask_scores_for_binarization(labels,
+                                                                             all_new_scores)
 
         if self.tag_moderator.stack_depth_change_by_id_l2 is not None:
             all_new_stack_depths = (
