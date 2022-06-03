@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from transformers import BertForTokenClassification
+from transformers import BertForTokenClassification, RobertaForTokenClassification
 
 from learning.crf import CRF
 
@@ -43,7 +43,7 @@ class BertCRFModel(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = RobertaForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
@@ -102,7 +102,7 @@ class BertLSTMModel(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = RobertaForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
@@ -152,7 +152,7 @@ class ModelForTetratagging(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = RobertaForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
             self.bert = BertForTokenClassification.from_pretrained(self.model_path,
