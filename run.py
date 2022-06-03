@@ -38,7 +38,7 @@ train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=Tru
                    help="Tagging schema")
 train.add_argument('--lang', choices=LANG, default=ENG, help="Language")
 train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
-train.add_argument('--model', choices=[BERT, BERTCRF, BERTLSTM], required=True,
+train.add_argument('--model', choices= BERT + BERTCRF + BERTLSTM, required=True,
                    help="Model architecture")
 
 
@@ -51,8 +51,10 @@ train.add_argument('--use-tensorboard', type=bool, default=False,
                    help="Whether to use the tensorboard for logging the results make sure to "
                         "add credentials to run.py if set to true")
 
-train.add_argument('--max-depth', type=int, default=25,
+train.add_argument('--max-depth', type=int, default=5,
                    help="Max stack depth used for decoding")
+train.add_argument('--keep-per-depth', type=int, default=1,
+                   help="Max elements to keep per depth")
 
 train.add_argument('--lr', type=float, default=5e-5)
 train.add_argument('--epochs', type=int, default=4)
@@ -67,8 +69,10 @@ evaluate.add_argument('--model-path', type=str, default='pat-models/')
 evaluate.add_argument('--bert-model-path', type=str, default='mbert/')
 evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
-evaluate.add_argument('--max-depth', type=int, default=25,
+evaluate.add_argument('--max-depth', type=int, default=5,
                       help="Max stack depth used for decoding")
+evaluate.add_argument('--keep-per-depth', type=int, default=1,
+                   help="Max elements to keep per depth")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
                       help="Whether to use the tensorboard for logging the results make sure "
                            "to add credentials to run.py if set to true")
@@ -136,7 +140,7 @@ def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size
 
 
 def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
-    if model_type == BERTCRF or model_type == BERTLSTM:
+    if model_type in BERTCRF or model_type in BERTLSTM:
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=2 * len(tag_system.tag_vocab),
@@ -146,7 +150,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
                 'is_eng': is_eng,
             }
         )
-    elif model_type == BERT and tagging_schema == TETRATAGGER:
+    elif model_type in BERT and tagging_schema == TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=len(tag_system.tag_vocab),
@@ -159,7 +163,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
                 'is_eng': is_eng
             }
         )
-    elif model_type == BERT and tagging_schema != TETRATAGGER:
+    elif model_type in BERT and tagging_schema != TETRATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=2 * len(tag_system.tag_vocab),
@@ -178,11 +182,11 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
 
 def initialize_model(model_type, tagging_schema, tag_system, model_path, is_eng):
     config = generate_config(model_type, tagging_schema, tag_system, model_path, is_eng)
-    if model_type == BERTCRF:
+    if model_type in BERTCRF:
         model = BertCRFModel(config=config)
-    elif model_type == BERTLSTM:
+    elif model_type in BERTLSTM:
         model = BertLSTMModel(config=config)
-    elif model_type == BERT:
+    elif model_type in BERT:
         model = ModelForTetratagging(config=config)
     else:
         logging.error("Invalid model type")
@@ -274,7 +278,7 @@ def train(args):
                                                    device)
                 dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
                                               tag_system, None,
-                                              "", args.max_depth)
+                                              "", args.max_depth, args.keep_per_depth)
                 writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
                 writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
@@ -377,7 +381,8 @@ def evaluate(args):
     parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system,
                                     args.output_path,
                                     args.model_name,
-                                    args.max_depth)  # TODO: missing CRF transition matrix
+                                    args.max_depth,
+                                    args.keep_per_depth)  # TODO: missing CRF transition matrix
     print(parse_metrics)
 
 

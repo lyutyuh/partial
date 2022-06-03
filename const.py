@@ -1,9 +1,9 @@
 TETRATAGGER = "tetra"
 TD_SR = "td-sr"
 BU_SR = "bu-sr"
-BERT = "bert"
-BERTCRF = "bert+crf"
-BERTLSTM = "bert+lstm"
+BERT = ["bert", "roberta"]
+BERTCRF = ["bert+crf", "roberta+crf"]
+BERTLSTM = ["bert+lstm", "roberta+lstm"]
 
 BAQ = "Basque"
 FRE = "French"

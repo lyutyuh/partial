@@ -17,16 +17,16 @@ class BeamSearch:
             self,
             tag_moderator,
             initial_stack_depth,
-            max_depth=12,
+            max_depth=5,
             min_depth=1,
-            keep_per_depth=5,
+            keep_per_depth=1,
             crf_transitions=None,
             initial_label=None,
     ):
         # Save parameters
         self.tag_moderator = tag_moderator
         self.valid_depths = np.arange(min_depth, max_depth)
-        self.keep_per_depth = 5  # TODO: add it to the parameter set
+        self.keep_per_depth = keep_per_depth
         self.max_depth = max_depth
         self.crf_transitions = crf_transitions
 

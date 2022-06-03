@@ -152,6 +152,13 @@ class TestPipeline(unittest.TestCase):
         example_tree.pretty_print()
         print(evalb("../EVALB/", [example_tree], [dummy]))
 
+    def test_tree_linearizations(self):
+        READER = BracketParseCorpusReader('../data/spmrl/',
+                                          ['English.train', 'English.dev', 'English.test'])
+        trees = READER.parsed_sents('English.test')
+        for tree in trees:
+            print(tree)
+            print(" ".join(tree.leaves()))
 
     def test_compare_to_original_tetratagger(self):
         # import pickle
@@ -349,7 +356,7 @@ class TestSPMRL(unittest.TestCase):
                                               [l + '.train', l + '.dev', l + '.test'])
             trees = READER.parsed_sents(l + '.test')
             trees[0].pretty_print()
-            tagger = SRTaggerTopDown(trees, add_remove_top=True)
+            tagger = SRTaggerBottomUp(trees, add_remove_top=True)
             print(tagger.tree_to_tags_pipeline(trees[0]))
             print(tagger.tree_to_ids_pipeline(trees[0]))
 
