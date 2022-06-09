@@ -12,7 +12,7 @@ from transformers import AdamW
 
 from const import *
 from learning.dataset import TaggingDataset
-from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy
+from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
@@ -279,31 +279,34 @@ def train(args):
                 dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
                                               tag_system, None,
                                               "", args.max_depth, args.keep_per_depth)
+                eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+
                 writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
                 writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
-                # eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                writer.add_scalar('loss/dev', eval_loss, n_iter)
+
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
-                if dev_metrics.fscore > last_fscore:
+                if eval_loss < last_fscore:  #if dev_metrics.fscore > last_fscore:
                     tol = 5
                     logging.info("tol refill")
-                    if dev_metrics.fscore > best_fscore:
+                    if eval_loss < best_fscore:  #if dev_metrics.fscore > best_fscore:
                         logging.info("save the best model")
-                        best_fscore = dev_metrics.fscore
+                        best_fscore = eval_loss
                         _save_best_model(model, args.output_path, run_name)
-                elif dev_metrics.fscore > 0:
+                elif eval_loss > 0: #dev_metrics.fscore
                     tol -= 1
                     for g in optimizer.param_groups:
-                        g['lr'] = g['lr'] / 2
+                        g['lr'] = g['lr'] / 2.
 
                 if tol < 0:
                     _finish_training(model, tag_system, eval_dataloader,
                                      eval_dataset, eval_loss, run_name, writer, args)
                     return
-                if dev_metrics.fscore > 0:  # not propagating the nan
-                    last_fscore = dev_metrics.fscore
+                if eval_loss > 0:  # not propagating the nan
+                    last_fscore = eval_loss
 
             n_iter += 1
             t += 1
