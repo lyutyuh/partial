@@ -328,14 +328,14 @@ class SRTaggerTopDown(SRTagger):
             raise ValueError("All the input sequence is not used")
         return node
 
-    def logits_to_ids(self, logits: [], mask, max_depth, crf_transitions=None) -> [int]:
+    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, crf_transitions=None) -> [int]:
         beam_search = BeamSearch(
             self.decode_moderator,
             initial_stack_depth=1,
             crf_transitions=crf_transitions,
             max_depth=max_depth,
             min_depth=0,
-            keep_per_depth=1,
+            keep_per_depth=keep_per_depth,
         )
 
         last_t = None
