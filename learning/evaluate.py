@@ -90,6 +90,7 @@ float, float):
         writer.add_pr_curve('odd_tags_pr_curve', odd_labels, odd_predictions, 0)
         writer.add_pr_curve('even_tags_pr_curve', even_labels, even_predictions, 1)
     return even_acc, odd_acc
+    return even_acc, odd_acc
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,

@@ -289,14 +289,14 @@ def train(args):
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
-                if eval_loss < last_fscore:  #if dev_metrics.fscore > last_fscore:
+                if dev_metrics.fscore > last_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
                     tol = 5
                     logging.info("tol refill")
-                    if eval_loss < best_fscore:  #if dev_metrics.fscore > best_fscore:
+                    if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > best_fscore:
                         logging.info("save the best model")
-                        best_fscore = eval_loss
+                        best_fscore = dev_metrics.fscore
                         _save_best_model(model, args.output_path, run_name)
-                elif eval_loss > 0: #dev_metrics.fscore
+                elif dev_metrics.fscore > 0: #dev_metrics.fscore
                     tol -= 1
                     for g in optimizer.param_groups:
                         g['lr'] = g['lr'] / 2.
@@ -305,8 +305,8 @@ def train(args):
                     _finish_training(model, tag_system, eval_dataloader,
                                      eval_dataset, eval_loss, run_name, writer, args)
                     return
-                if eval_loss > 0:  # not propagating the nan
-                    last_fscore = eval_loss
+                if dev_metrics.fscore > 0:  # not propagating the nan
+                    last_fscore = dev_metrics.fscore
 
             n_iter += 1
             t += 1
@@ -324,8 +324,8 @@ def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss
                      run_name, writer, args):
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, 16,
-                                       device)  # TODO: remove the constant batch size
+                                       num_tags, args.batch_size,
+                                       device)
     even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
                                           args.use_tensorboard)
     register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
