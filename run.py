@@ -250,9 +250,9 @@ def train(args):
     n_iter = 0
 
     when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
-    eval_loss = 1000
-    last_fscore = 1000
-    best_fscore = 1000
+    # eval_loss = 1000
+    last_fscore = 0
+    best_fscore = 0
     tol = 5
 
     for _ in tq(range(args.epochs)):
