@@ -109,7 +109,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
-            print(message)
+            # print(message)
             c_err += 1
             predicted_dev_trees.append(create_dummy_tree(original_tree.pos()))
             continue
