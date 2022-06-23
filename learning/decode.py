@@ -28,6 +28,7 @@ class BeamSearch:
         self.valid_depths = np.arange(min_depth, max_depth)
         self.keep_per_depth = keep_per_depth
         self.max_depth = max_depth
+        self.min_depth = min_depth
         self.crf_transitions = crf_transitions
 
         # Initialize the beam
@@ -127,3 +128,57 @@ class BeamSearch:
             beam = beam.prev
 
         return score, label_idxs
+
+
+class GreedySearch(BeamSearch):
+    def advance(self, label_logits, is_last=False):
+        label_log_probs = label_logits
+
+        all_new_scores = self.compute_new_scores(label_log_probs, is_last)
+        if self.tag_moderator.mask_binarize and self.beam.labels is not None:
+            labels = self.beam.labels
+            all_new_scores = self.tag_moderator.mask_scores_for_binarization(labels,
+                                                                             all_new_scores)
+
+        if self.tag_moderator.stack_depth_change_by_id_l2 is not None:
+            all_new_stack_depths = (
+                    self.beam.stack_depths[:, None]
+                    + self.tag_moderator.stack_depth_change_by_id_l2[None, :]
+            )
+
+            all_new_scores, all_new_stack_depths = self.extra_mask_layer(all_new_scores,
+                                                                         all_new_stack_depths)
+        else:
+            all_new_stack_depths = (
+                    self.beam.stack_depths[:, None]
+                    + self.tag_moderator.stack_depth_change_by_id[None, :]
+            )
+
+        masked_scores = all_new_scores + np.where((all_new_stack_depths >= self.min_depth)
+                                                  & (all_new_stack_depths <= self.max_depth),
+                                                  0.0,
+                                                  -np.inf)
+
+        masked_scores = masked_scores.reshape(-1)
+        idxs = np.argsort(-masked_scores)[:self.keep_per_depth].flatten()
+
+        backptrs, labels = np.unravel_index(idxs, all_new_scores.shape)
+
+        transition_valid = (all_new_stack_depths[
+                                backptrs, labels
+                            ] >= self.min_depth) & (all_new_stack_depths[
+                                                        backptrs, labels
+                                                    ] <= self.max_depth)
+
+        backptrs = backptrs[transition_valid]
+        labels = labels[transition_valid]
+
+
+        self.beam = Beam(
+            all_new_scores[backptrs, labels],
+            all_new_stack_depths[backptrs, labels],
+            self.beam,
+            backptrs,
+            labels,
+        )
+

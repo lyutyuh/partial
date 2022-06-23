@@ -67,11 +67,11 @@ class Tagger(ABC):
         tags = [self.tag_vocab[idx] for idx in ids]
         return self.tags_to_tree_pipeline(tags, input_seq)
 
-    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth) -> [int]:
+    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, is_greedy=False) -> [int]:
         raise NotImplementedError("logits to ids is not implemented")
 
-    def logits_to_tree(self, logits: [], leave_nodes: [], mask=None, max_depth=5, keep_per_depth=1) -> Tree:
-        ids = self.logits_to_ids(logits, mask, max_depth, keep_per_depth)
+    def logits_to_tree(self, logits: [], leave_nodes: [], mask=None, max_depth=5, keep_per_depth=1, is_greedy=False) -> Tree:
+        ids = self.logits_to_ids(logits, mask, max_depth, keep_per_depth, is_greedy=is_greedy)
         return self.ids_to_tree_pipeline(ids, leave_nodes)
 
     def preprocess(self, original_tree: Tree) -> PTree:

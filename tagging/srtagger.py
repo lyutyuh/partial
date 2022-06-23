@@ -4,7 +4,7 @@ from abc import ABC
 from nltk import ParentedTree as PTree
 from tqdm import tqdm as tq
 
-from learning.decode import BeamSearch
+from learning.decode import BeamSearch, GreedySearch
 from tagging.tagger import Tagger, TagDecodeModerator
 from tagging.transform import LeftCornerTransformer
 
@@ -235,14 +235,25 @@ class SRTaggerBottomUp(SRTagger):
             raise ValueError("All the input sequence is not used")
         return node
 
-    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, crf_transitions=None) -> [int]:
-        beam_search = BeamSearch(
-            self.decode_moderator,
-            initial_stack_depth=0,
-            crf_transitions=crf_transitions,
-            max_depth=max_depth,
-            keep_per_depth=keep_per_depth,
-        )
+    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, crf_transitions=None,
+                      is_greedy=False) -> [int]:
+        if is_greedy:
+            searcher = GreedySearch(
+                self.decode_moderator,
+                initial_stack_depth=0,
+                crf_transitions=crf_transitions,
+                max_depth=max_depth,
+                keep_per_depth=keep_per_depth,
+            )
+        else:
+
+            searcher = BeamSearch(
+                self.decode_moderator,
+                initial_stack_depth=0,
+                crf_transitions=crf_transitions,
+                max_depth=max_depth,
+                keep_per_depth=keep_per_depth,
+            )
 
         last_t = None
         seq_len = sum(mask)
@@ -251,16 +262,16 @@ class SRTaggerBottomUp(SRTagger):
             if mask is not None and not mask[t]:
                 continue
             if last_t is not None:
-                beam_search.advance(
+                searcher.advance(
                     logits[last_t, :-len(self.tag_vocab)]
                 )
             if idx == seq_len:
-                beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=True)
+                searcher.advance(logits[t, -len(self.tag_vocab):], is_last=True)
             else:
-                beam_search.advance(logits[t, -len(self.tag_vocab):])
+                searcher.advance(logits[t, -len(self.tag_vocab):])
             last_t = t
 
-        score, best_tag_ids = beam_search.get_path()
+        score, best_tag_ids = searcher.get_path()
         return best_tag_ids
 
 
@@ -328,15 +339,26 @@ class SRTaggerTopDown(SRTagger):
             raise ValueError("All the input sequence is not used")
         return node
 
-    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, crf_transitions=None) -> [int]:
-        beam_search = BeamSearch(
-            self.decode_moderator,
-            initial_stack_depth=1,
-            crf_transitions=crf_transitions,
-            max_depth=max_depth,
-            min_depth=0,
-            keep_per_depth=keep_per_depth,
-        )
+    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, crf_transitions=None,
+                      is_greedy=False) -> [int]:
+        if is_greedy:
+            searcher = GreedySearch(
+                self.decode_moderator,
+                initial_stack_depth=1,
+                crf_transitions=crf_transitions,
+                max_depth=max_depth,
+                min_depth=0,
+                keep_per_depth=keep_per_depth,
+            )
+        else:
+            searcher = BeamSearch(
+                self.decode_moderator,
+                initial_stack_depth=1,
+                crf_transitions=crf_transitions,
+                max_depth=max_depth,
+                min_depth=0,
+                keep_per_depth=keep_per_depth,
+            )
 
         last_t = None
         seq_len = sum(mask)
@@ -346,18 +368,18 @@ class SRTaggerTopDown(SRTagger):
             if mask is not None and not mask[t]:
                 continue
             if last_t is not None:
-                beam_search.advance(
+                searcher.advance(
                     logits[last_t, :-len(self.tag_vocab)]
                 )
             if idx == seq_len:
                 is_last = True
             if last_t is None:
-                beam_search.advance(
+                searcher.advance(
                     logits[t, -len(self.tag_vocab):] + self.decode_moderator.reduce_tags_only,
                     is_last=is_last)
             else:
-                beam_search.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)
+                searcher.advance(logits[t, -len(self.tag_vocab):], is_last=is_last)
             last_t = t
 
-        score, best_tag_ids = beam_search.get_path(required_stack_depth=0)
+        score, best_tag_ids = searcher.get_path(required_stack_depth=0)
         return best_tag_ids

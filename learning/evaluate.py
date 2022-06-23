@@ -94,7 +94,7 @@ float, float):
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,
-                    model_name, max_depth, keep_per_depth) -> ParseMetrics:
+                    model_name, max_depth, keep_per_depth, is_greedy) -> ParseMetrics:
     predicted_dev_trees = []
     gold_dev_trees = []
     c_err = 0
@@ -105,7 +105,7 @@ def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_p
         gold_dev_trees.append(original_tree)
         try:  # ignore the ones that failed in unchomsky_normal_form
             tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word,
-                                             max_depth=max_depth, keep_per_depth=keep_per_depth)
+                                             max_depth=max_depth, keep_per_depth=keep_per_depth, is_greedy=is_greedy)
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)

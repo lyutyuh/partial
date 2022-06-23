@@ -71,6 +71,8 @@ evaluate.add_argument('--output-path', type=str, default='results/')
 evaluate.add_argument('--batch-size', type=int, default=16)
 evaluate.add_argument('--max-depth', type=int, default=5,
                       help="Max stack depth used for decoding")
+evaluate.add_argument('--is-greedy', type=bool, default=False,
+                      help="Whether or not to use greedy decoding")
 evaluate.add_argument('--keep-per-depth', type=int, default=1,
                    help="Max elements to keep per depth")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
@@ -278,7 +280,7 @@ def train(args):
                                                    device)
                 dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
                                               tag_system, None,
-                                              "", args.max_depth, args.keep_per_depth)
+                                              "", args.max_depth, args.keep_per_depth, False)
                 eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
 
                 writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
@@ -385,7 +387,8 @@ def evaluate(args):
                                     args.output_path,
                                     args.model_name,
                                     args.max_depth,
-                                    args.keep_per_depth)  # TODO: missing CRF transition matrix
+                                    args.keep_per_depth,
+                                    args.is_greedy)  # TODO: missing CRF transition matrix
     print(parse_metrics)
 
 

@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from transformers import BertForTokenClassification, RobertaForTokenClassification
+from transformers import BertForTokenClassification
 
 from learning.crf import CRF
 

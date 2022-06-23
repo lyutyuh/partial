@@ -5,7 +5,7 @@ import numpy as np
 from nltk import ParentedTree as PTree
 from nltk import Tree
 
-from learning.decode import BeamSearch
+from learning.decode import BeamSearch, GreedySearch
 from tagging.tagger import Tagger, TagDecodeModerator
 from tagging.transform import LeftCornerTransformer, RightCornerTransformer
 from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
@@ -138,26 +138,34 @@ class TetraTagger(Tagger, ABC):
             prev_state = state
         return True
 
-    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth) -> [int]:
-        beam_search = BeamSearch(
+    def logits_to_ids(self, logits: [], mask, max_depth, keep_per_depth, is_greedy=False) -> [int]:
+        if is_greedy:
+            searcher = GreedySearch(
             self.decode_moderator,
             initial_stack_depth=0,
             max_depth=max_depth,
             keep_per_depth=keep_per_depth,
         )
+        else:
+            searcher = BeamSearch(
+                self.decode_moderator,
+                initial_stack_depth=0,
+                max_depth=max_depth,
+                keep_per_depth=keep_per_depth,
+            )
 
         last_t = None
         for t in range(logits.shape[0]):
             if mask is not None and not mask[t]:
                 continue
             if last_t is not None:
-                beam_search.advance(
+                searcher.advance(
                     logits[last_t, :] + self.decode_moderator.internal_tags_only
                 )
-            beam_search.advance(logits[t, :] + self.decode_moderator.leaf_tags_only)
+            searcher.advance(logits[t, :] + self.decode_moderator.leaf_tags_only)
             last_t = t
 
-        score, best_tag_ids = beam_search.get_path()
+        score, best_tag_ids = searcher.get_path()
         return best_tag_ids
 
 
