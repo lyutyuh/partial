@@ -1,7 +1,10 @@
 import argparse
 import logging
 import pickle
+import random
+import sys
 
+import numpy as np
 import torch
 import transformers
 from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
@@ -16,6 +19,13 @@ from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, repor
 from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
+
+# Set random seed
+RANDOM_SEED = 100
+torch.manual_seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+print('Random seed: {}'.format(RANDOM_SEED), file=sys.stderr)
 
 logging.getLogger().setLevel(logging.INFO)
 

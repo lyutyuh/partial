@@ -21,7 +21,7 @@ or `tetra` for in-order linearization.
 ## Training
 Train the model and store the best checkpoint.
 ```bash
-python run.py train --batch-size [BATCH_SIZE]  --tagger [TAGGER] --lang [LANGUAGE] --model [MODEL] --epochs [EPOCHS] --lr [LR] --model-path [MODEL_PATH] --output-path [PATH] --max-depth [DEPTH] --keep-per-depth [KPD] --use-tensorboard [True/False]
+python run.py train --batch-size [BATCH_SIZE]  --tagger [TAGGER] --lang [LANGUAGE] --model [MODEL] --epochs [EPOCHS] --lr [LR] --model-path [MODEL_PATH] --output-path [PATH] --max-depth [DEPTH] --keep-per-depth [KPD] [--use-tensorboard]
 ```
 - batch size: use 32 to reproduce the results
 - tagger: `td-sr` or `bu-sr` or `tetra`
@@ -36,7 +36,7 @@ python run.py train --batch-size [BATCH_SIZE]  --tagger [TAGGER] --lang [LANGUAG
 ## Evaluation
 Calculate evaluation metrics: fscore, precision, recall, loss.
 ```bash
-python run.py evaluate --lang [LANGUAGE] --model-name [MODEL]  --model-path [MODEL_PATH] --bert-model-path [BERT_PATH] --max-depth [DEPTH] --keep-per-depth [KPD] 
+python run.py evaluate --lang [LANGUAGE] --model-name [MODEL]  --model-path [MODEL_PATH] --bert-model-path [BERT_PATH] --max-depth [DEPTH] --keep-per-depth [KPD]  [--is-greedy]
 ```
 - lang: language, one of the nine languages reported in the paper
 - model name: name of the checkpoint
@@ -44,4 +44,5 @@ python run.py evaluate --lang [LANGUAGE] --model-name [MODEL]  --model-path [MOD
 - bert model path: path to the pretrained model
 - max depth: maximum depth to keep in the decoding lattice
 - keep per depth: number of elements to keep track of in the decoding step
+- is greedy: whether or not use the greedy decoding, default is false
 
