@@ -293,7 +293,6 @@ class BottomUpTetratagger(TetraTagger):
 
 
 class TopDownTetratagger(TetraTagger):
-
     @staticmethod
     def create_merge_shift_tag(label: str, left_or_right: str) -> str:
         if label.find("+") != -1:

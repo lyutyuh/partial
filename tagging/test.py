@@ -429,17 +429,69 @@ class TestStackSize(unittest.TestCase):
 
 
 class TestDependencyTree(unittest.TestCase):
+    def test_predictions(self):
+        import pickle
+        with open("../data/logit_preds_sample.pkl", "rb") as f:
+            predictions = pickle.load(f)
+        with open('../data/vocab/English-hexa.pkl', 'rb') as f:
+            tag_vocab = pickle.load(f)
+
+        READER = BracketParseCorpusReader('../data/ptb',
+                                          ['English.train', 'English.dev', 'English.test'])
+        tag_system = HexaTagger(tag_vocab=tag_vocab,
+                                trees=READER.parsed_sents('English.train'))
+
+        from run import prepare_test_data
+        tagging_schema = "hexa"
+        bert_model_path = "../bertlarge"
+        lang = "English"
+        batch_size = 16
+        eval_dataset, eval_dataloader = prepare_test_data(READER,
+                                                          tag_system, tagging_schema,
+                                                          bert_model_path,
+                                                          batch_size,
+                                                          lang)
+
+        n = len(eval_dataset)
+        eval_labels = np.zeros((n, 256), dtype=int)
+        idx = 0
+
+        for batch in tq(eval_dataloader):
+            if idx * 16 >= n:
+                break
+            labels = batch['labels']
+            eval_labels[idx * 16:(idx + 1) * 16, :] = labels.cpu().numpy()
+            idx += 1
+
+        for i in tq(range(predictions.shape[0])):
+            if len(eval_dataset.trees[i].leaves()) > 10:
+                continue
+            logits = predictions[i]
+            is_word = eval_labels[i] != 0
+            temp_tree = eval_dataset.trees[i].copy(deep=True)
+            tetratagger = TopDownTetratagger()
+            print(tetratagger.tree_to_tags_pipeline(temp_tree))
+            original_tree = eval_dataset.trees[i]
+
+            input_seq = [(word, "") for (word, pos) in original_tree.pos()]
+            tags = tag_system.tree_to_tags_pipeline(original_tree)[0]
+            print()
+            print(f"gold tags {tags}")
+            print(logits.shape)
+            tree = tag_system.logits_to_tree(logits, input_seq, mask=is_word,
+                                         max_depth=10, keep_per_depth=5, is_greedy=False)
+            tree.pretty_print()
+
+
     def test_lex_tree(self):
         l = "English"
-        split = "dev"
+        split = "train"
         reader = BracketParseCorpusReader('../data/ptb', [f'{l}.{split}'])
         trees = reader.parsed_sents([f'{l}.{split}'])
 
         tagger = HexaTagger()
 
         for tree in tq(trees):
-            print(tree.leaves())
-            break
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)[0]
             input_seq = [(leaf.split("^^^")[0], "") for leaf in tree.leaves()]
