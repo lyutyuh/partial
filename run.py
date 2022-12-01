@@ -17,6 +17,7 @@ from const import *
 from learning.dataset import TaggingDataset
 from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
+from tagging.hexatagger import HexaTagger
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
 from tagging.tetratagger import BottomUpTetratagger
 
@@ -30,7 +31,7 @@ print('Random seed: {}'.format(RANDOM_SEED), file=sys.stderr)
 logging.getLogger().setLevel(logging.INFO)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-DATA_PATH = "data/spmrl/"
+
 
 parser = argparse.ArgumentParser()
 subparser = parser.add_subparsers(dest='command')
@@ -38,13 +39,13 @@ train = subparser.add_parser('train')
 evaluate = subparser.add_parser('evaluate')
 vocab = subparser.add_parser('vocab')
 
-vocab.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
+vocab.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR, HEXATAGGER], required=True,
                    help="Tagging schema")
 vocab.add_argument('--lang', choices=LANG, default=ENG, help="Language")
-vocab.add_argument('--output-path', choices=[TETRATAGGER, TD_SR, BU_SR],
+vocab.add_argument('--output-path', choices=[TETRATAGGER, TD_SR, BU_SR, HEXATAGGER],
                    default="data/vocab/")
 
-train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR], required=True,
+train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR, HEXATAGGER], required=True,
                    help="Tagging schema")
 train.add_argument('--lang', choices=LANG, default=ENG, help="Language")
 train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
@@ -107,14 +108,22 @@ def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path="",
     elif tagging_schema == TETRATAGGER:
         tag_system = BottomUpTetratagger(trees=reader.parsed_sents(lang + '.train'),
                                          tag_vocab=tag_vocab, add_remove_top=add_remove_top)
+    elif tagging_schema == HEXATAGGER:
+        tag_system = HexaTagger(trees=reader.parsed_sents(lang + '.train'),
+                                         tag_vocab=tag_vocab, add_remove_top=add_remove_top)
     else:
         logging.error("Please specify the tagging schema")
         return
     return tag_system
 
+def get_data_path(tagger):
+    if tagger == HEXATAGGER:
+        return DEP_DATA_PATH
+    return DATA_PATH
 
 def save_vocab(args):
-    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
+    data_path = get_data_path(args.tagger)
+    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
                                                   args.lang + '.test'])
     tag_system = initialize_tag_system(reader, args.tagger, args.lang,
                                        add_remove_top=args.lang == ENG)
@@ -123,7 +132,7 @@ def save_vocab(args):
 
 
 def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
-    is_tetratags = True if tagging_schema == TETRATAGGER else False
+    is_tetratags = True if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
     train_dataset = TaggingDataset(lang + '.train', tokenizer, tag_system, reader, device,
@@ -140,7 +149,7 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
 
 
 def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
-    is_tetratags = True if tagging_schema == TETRATAGGER else False
+    is_tetratags = True if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER else False
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
     test_dataset = TaggingDataset(lang + '.test', tokenizer, tag_system, reader, device,
@@ -162,7 +171,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
                 'is_eng': is_eng,
             }
         )
-    elif model_type in BERT and tagging_schema == TETRATAGGER:
+    elif model_type in BERT and (tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER):
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=len(tag_system.tag_vocab),
@@ -175,7 +184,7 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
                 'is_eng': is_eng
             }
         )
-    elif model_type in BERT and tagging_schema != TETRATAGGER:
+    elif model_type in BERT and tagging_schema != TETRATAGGER and tagging_schema != HEXATAGGER:
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=2 * len(tag_system.tag_vocab),
@@ -228,7 +237,8 @@ def register_run_metrics(writer, run_name, lr, epochs, eval_loss, even_tag_accur
 
 
 def train(args):
-    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
+    data_path = get_data_path(args.tagger)
+    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
                                                   args.lang + '.test'])
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, args.tagger, args.lang,
@@ -356,7 +366,7 @@ def decode_model_name(model_name):
 
 
 def calc_num_tags_per_task(tagging_schema, tag_system):
-    if tagging_schema == TETRATAGGER:
+    if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER:
         num_leaf_labels = tag_system.decode_moderator.leaf_tag_vocab_size
         num_tags = len(tag_system.tag_vocab)
     else:
@@ -366,9 +376,10 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 
 
 def evaluate(args):
-    reader = BracketParseCorpusReader(DATA_PATH, [args.lang + '.train', args.lang + '.dev',
-                                                  args.lang + '.test'])
     tagging_schema, model_type = decode_model_name(args.model_name)
+    data_path = get_data_path(tagging_schema)
+    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
+                                                  args.lang + '.test'])
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, tagging_schema, args.lang,

@@ -1,4 +1,10 @@
+DUMMY_LABEL = "Y|X"
+
+DATA_PATH = "data/spmrl/"
+DEP_DATA_PATH = "data/ptb/"
+
 TETRATAGGER = "tetra"
+HEXATAGGER = "hexa"
 TD_SR = "td-sr"
 BU_SR = "bu-sr"
 BERT = ["bert", "roberta", "robertaL"]
