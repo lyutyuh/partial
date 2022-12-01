@@ -1,8 +1,9 @@
 # An Analysis of Parsing as Tagging
 <p align="center">
-  <img src="https://github.com/rycolab/parsing-tools/blob/main/header.jpg">
+  <img src="https://github.com/rycolab/parsing-tools/blob/main/header.jpg" width=400>
 </p>
 This repository contains code for training and evaluation of parsing as tagging methods for constituency parsing.
+
 ## Setting Up The Environment
 Set up a virtual environment and install the dependencies:
 ```bash
