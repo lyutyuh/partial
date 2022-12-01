@@ -272,7 +272,8 @@ def train(args):
     n_iter = 0
 
     when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
-    # eval_loss = 1000
+    best_eval_loss = np.inf
+    last_eval_loss = np.inf
     last_fscore = 0
     best_fscore = 0
     tol = 5
@@ -311,14 +312,14 @@ def train(args):
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
-                if dev_metrics.fscore > last_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
+                if eval_loss < last_eval_loss:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
                     tol = 5
                     logging.info("tol refill")
-                    if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > best_fscore:
+                    if eval_loss < best_eval_loss:  #if dev_metrics.fscore > best_fscore:
                         logging.info("save the best model")
-                        best_fscore = dev_metrics.fscore
+                        best_eval_loss = eval_loss
                         _save_best_model(model, args.output_path, run_name)
-                elif dev_metrics.fscore > 0: #dev_metrics.fscore
+                elif eval_loss > 0: #dev_metrics.fscore
                     tol -= 1
                     for g in optimizer.param_groups:
                         g['lr'] = g['lr'] / 2.
@@ -327,8 +328,8 @@ def train(args):
                     _finish_training(model, tag_system, eval_dataloader,
                                      eval_dataset, eval_loss, run_name, writer, args)
                     return
-                if dev_metrics.fscore > 0:  # not propagating the nan
-                    last_fscore = dev_metrics.fscore
+                if eval_loss > 0:  # not propagating the nan
+                    last_eval_loss = eval_loss
 
             n_iter += 1
             t += 1
