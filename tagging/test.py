@@ -438,6 +438,8 @@ class TestDependencyTree(unittest.TestCase):
         tagger = HexaTagger()
 
         for tree in tq(trees):
+            print(tree.leaves())
+            break
             original_tree = tree.copy(deep=True)
             tags = tagger.tree_to_tags_pipeline(tree)[0]
             input_seq = [(leaf.split("^^^")[0], "") for leaf in tree.leaves()]
