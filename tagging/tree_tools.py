@@ -1,3 +1,4 @@
+import logging
 import random
 import string
 from enum import Enum
@@ -185,3 +186,15 @@ def binarize_lex_tree(children, node, node_type):
         return node
     else:
         raise ValueError("node has zero children!")
+
+def expand_unary(tree):
+    if len(tree) == 1:
+        label = tree.label().split("+")
+        pos_label = label[1]
+        tree.set_label(label[0])
+        tree[0] = Tree(pos_label, [tree[0]])
+        return
+    for child in tree:
+        expand_unary(child)
+
+

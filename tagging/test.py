@@ -482,20 +482,24 @@ class TestDependencyTree(unittest.TestCase):
                                          max_depth=10, keep_per_depth=5, is_greedy=False)
             tree.pretty_print()
 
-
     def test_lex_tree(self):
         l = "English"
         split = "train"
-        reader = BracketParseCorpusReader('../data/ptb', [f'{l}.{split}'])
-        trees = reader.parsed_sents([f'{l}.{split}'])
+        reader = BracketParseCorpusReader('../data/ptb/new', [f'{l}.lex.{split}'])
+        trees = reader.parsed_sents([f'{l}.lex.{split}'])
 
         tagger = HexaTagger()
+        depths = []
 
         for tree in tq(trees):
             original_tree = tree.copy(deep=True)
-            tags = tagger.tree_to_tags_pipeline(tree)[0]
-            input_seq = [(leaf.split("^^^")[0], "") for leaf in tree.leaves()]
-            tree_back = tagger.tags_to_tree_pipeline(tags, input_seq)
+            # original_tree.pretty_print()
+            output = tagger.tree_to_tags_pipeline(tree)
+            tags = output[0]
+            # print(tags)
+            depths.append(output[1])
+            # input_seq = [(leaf.split("^^^")[0], "") for leaf in tree.leaves()]
+            tree_back = tagger.tags_to_tree_pipeline(tags, tree.pos())
             self.assertEqual(original_tree, tree_back)
             # tagger.tags_to_tree_pipeline()
             # tree.collapse_unary(collapsePOS=True, collapseRoot=True)
@@ -520,6 +524,7 @@ class TestDependencyTree(unittest.TestCase):
             # debinarize_lex_tree(new_root, root_back)
             # root_back.pretty_print()
             # self.assertEqual(relabeled_tree, root_back)
+        print(max(depths))
 
     def test_write_to_file(self):
         l = "English"

@@ -6,18 +6,19 @@ from nltk import Tree
 from const import DUMMY_LABEL
 from tagging.tetratagger import TopDownTetratagger, BottomUpTetratagger
 from tagging.transform import LeftCornerTransformer, RightCornerTransformer
-from tagging.tree_tools import binarize_lex_tree, debinarize_lex_tree
+from tagging.tree_tools import binarize_lex_tree, debinarize_lex_tree, expand_unary
 
 
 class HexaTagger(BottomUpTetratagger, ABC):
     def preprocess(self, original_tree: Tree) -> PTree:
         tree = original_tree.copy(deep=True)
         tree.collapse_unary(collapsePOS=True, collapseRoot=True)
-        new_root = Tree(tree.label(), [])
-        new_root = binarize_lex_tree(tree, new_root, "X")
+        # tree.pretty_print()
+        # new_root = Tree(tree.label(), [])
+        # new_root = binarize_lex_tree(tree, new_root, "X")
         # new_root.pretty_print()
 
-        ptree = PTree.convert(new_root)
+        ptree = PTree.convert(tree)
         root_label = ptree.label()
         tree_lc = PTree(root_label, [])
         RightCornerTransformer.transform(tree_lc, ptree, ptree)
@@ -26,6 +27,7 @@ class HexaTagger(BottomUpTetratagger, ABC):
     @staticmethod
     def create_shift_tag(label: str, left_or_right: str) -> str:
         arc_label = label.split("^^^")[-1]
+        arc_label = arc_label.split("+")[0]
         return left_or_right + "/" + arc_label
 
     @staticmethod
@@ -52,10 +54,23 @@ class HexaTagger(BottomUpTetratagger, ABC):
         ptree = self.tags_to_tree(tags, input_seq)
         return self.postprocess(ptree)
 
+    # @staticmethod
+    # def _create_pre_terminal_label(tag: str, default="X") -> str:
+    #     idx = tag.find("/")
+    #     arc_label = tag.split("/")[1]
+    #     if idx != -1:
+    #         label = tag[idx + 1:].replace("/", "+")
+    #         if default == "":
+    #             return label + "+"
+    #         else:
+    #             return label
+    #     else:
+    #         return default
+
     @staticmethod
     def _create_pre_terminal_label(tag: str, default="X") -> str:
         arc_label = tag.split("/")[1]
-        return f"X^^^{arc_label}"
+        return f"X^^^{arc_label}+"
 
     @staticmethod
     def _create_unary_reduce_label(tag: str) -> str:
@@ -78,10 +93,14 @@ class HexaTagger(BottomUpTetratagger, ABC):
         tree = RightCornerTransformer.rev_transform(tree, transformed_tree)
         tree = Tree.convert(tree)
         if len(tree.leaves()) == 1:
+            expand_unary(tree)
             # edge case with one node
             return tree
+
         debinarized_tree = Tree(tree.label(), [])
         debinarize_lex_tree(tree, debinarized_tree)
+        expand_unary(debinarized_tree)
+        # debinarized_tree.pretty_print()
         return debinarized_tree
 
     def logits_to_tree(self, logits: [], leave_nodes: [], mask=None, max_depth=5, keep_per_depth=1, is_greedy=False) -> Tree:
