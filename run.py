@@ -344,8 +344,7 @@ def train(args):
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
-<<<<<<< HEAD
-=======
+
                 if dev_metrics.fscore > last_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
                     tol = 5
                     logging.info("tol refill")
@@ -365,7 +364,6 @@ def train(args):
                 if dev_metrics.fscore > 0:  # not propagating the nan
                     last_eval_loss = eval_loss
                     last_fscore = dev_metrics.fscore
->>>>>>> cd3d69d76e9579cfdc95a72e085182de2b0c9cad
 
             if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
                 tol = 99999
