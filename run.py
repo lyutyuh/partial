@@ -344,6 +344,28 @@ def train(args):
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
+<<<<<<< HEAD
+=======
+                if dev_metrics.fscore > last_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
+                    tol = 5
+                    logging.info("tol refill")
+                    if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > best_fscore:
+                        logging.info("save the best model")
+                        best_fscore = dev_metrics.fscore
+                        _save_best_model(model, args.output_path, run_name)
+                elif dev_metrics.fscore > 0: #dev_metrics.fscore
+                    tol -= 1
+                    for g in optimizer.param_groups:
+                        g['lr'] = g['lr'] / 2.
+
+                if tol < 0:
+                    _finish_training(model, tag_system, eval_dataloader,
+                                     eval_dataset, eval_loss, run_name, writer, args)
+                    return
+                if dev_metrics.fscore > 0:  # not propagating the nan
+                    last_eval_loss = eval_loss
+                    last_fscore = dev_metrics.fscore
+>>>>>>> cd3d69d76e9579cfdc95a72e085182de2b0c9cad
 
             if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
                 tol = 99999
