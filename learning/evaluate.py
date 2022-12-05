@@ -10,6 +10,7 @@ import torch
 from tqdm import tqdm as tq
 
 from tagging.tree_tools import create_dummy_tree
+from sklearn.metrics import precision_recall_fscore_support
 
 
 class ParseMetrics(object):
@@ -23,11 +24,11 @@ class ParseMetrics(object):
 
     def __str__(self):
         if self.tagging_accuracy < 100:
-            return "(Recall={:.2f}, Precision={:.2f}, ParseMetrics={:.2f}, CompleteMatch={:.2f}, TaggingAccuracy={:.2f})".format(
+            return "(Recall={:.4f}, Precision={:.4f}, ParseMetrics={:.4f}, CompleteMatch={:.4f}, TaggingAccuracy={:.4f})".format(
                 self.recall, self.precision, self.fscore, self.complete_match,
                 self.tagging_accuracy)
         else:
-            return "(Recall={:.2f}, Precision={:.2f}, ParseMetrics={:.2f}, CompleteMatch={:.2f})".format(
+            return "(Recall={:.4f}, Precision={:.4f}, ParseMetrics={:.4f}, CompleteMatch={:.4f})".format(
                 self.recall, self.precision, self.fscore, self.complete_match)
 
 
@@ -52,8 +53,6 @@ def predict(model, eval_dataloader, dataset_size, num_tags, batch_size, device) 
     eval_labels = np.zeros((dataset_size, 256), dtype=int)
     idx = 0
     for batch in tq(eval_dataloader):
-        if idx * batch_size >= dataset_size:
-            break
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
             outputs = model(**batch)
@@ -90,7 +89,115 @@ float, float):
         writer.add_pr_curve('odd_tags_pr_curve', odd_labels, odd_predictions, 0)
         writer.add_pr_curve('even_tags_pr_curve', even_labels, even_predictions, 1)
     return even_acc, odd_acc
-    return even_acc, odd_acc
+
+
+
+def get_dependency_from_lexicalized_tree(lex_tree, triple_dict, offset=0):
+    # this recursion assumes projectivity
+    # Input:
+    #     root of lex-tree
+    # Output:
+    #     the global index of the dependency root
+    if type(lex_tree) is not str and len(lex_tree) == 1:
+        # unary rule
+        # returning the global index of the head
+        return offset
+
+    head_branch_index = int(lex_tree.label().split("^^^")[1])
+    head_global_index = None
+    branch_to_global_dict = {}
+
+    for branch_id_child, child in enumerate(lex_tree):
+        global_id_child = get_dependency_from_lexicalized_tree(
+            child, triple_dict, offset=offset
+        )
+        offset = offset + len(child.leaves())
+        branch_to_global_dict[branch_id_child] = global_id_child
+        if branch_id_child == head_branch_index:
+            head_global_index = global_id_child
+
+    for branch_id_child, child in enumerate(lex_tree):
+        if branch_id_child != head_branch_index:
+            triple_dict[branch_to_global_dict[branch_id_child]] = head_global_index
+
+    return head_global_index
+
+def is_punctuation(pos):
+    punct_set = '.' '``' "''" ':' ','
+    return pos in punct_set or pos == 'PU' # for chinese
+
+def get_dep_triples(lex_tree):
+    triple_dict = {}
+    dep_triples = []
+    sent_root = get_dependency_from_lexicalized_tree(
+        lex_tree, triple_dict
+    )
+    # the root of the whole sentence should refer to ROOT
+    assert sent_root not in triple_dict
+    # the root of the sentence
+    triple_dict[sent_root] = -1
+    for head, tail in sorted(triple_dict.items()):
+        dep_triples.append((
+            head, tail,
+            lex_tree.pos()[head][1].split("^^^")[1].split("+")[0],
+            lex_tree.pos()[head][1].split("^^^")[1].split("+")[1]
+        ))
+    return dep_triples
+
+
+def dependency_eval(
+    predictions, eval_labels, eval_dataset, tag_system, output_path,
+    model_name, max_depth, keep_per_depth, is_greedy
+) -> ParseMetrics:
+    predicted_dev_triples, predicted_dev_triples_unlabeled = [], []
+    gold_dev_triples, gold_dev_triples_unlabeled = [], []
+    c_err = 0
+    for i in tq(range(predictions.shape[0])):
+        logits = predictions[i]
+        is_word = eval_labels[i] != 0
+        original_tree = eval_dataset.trees[i]
+        original_tree.collapse_unary(collapsePOS=True, collapseRoot=True)
+
+
+        try:  # ignore the ones that failed in unchomsky_normal_form
+            tree = tag_system.logits_to_tree(logits, original_tree.pos(), mask=is_word,
+                                             max_depth=max_depth, keep_per_depth=keep_per_depth, is_greedy=is_greedy)
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            # print(message)
+            c_err += 1
+            predicted_dev_trees.append(create_dummy_tree(original_tree.pos()))
+            continue
+        if tree.leaves() != original_tree.leaves():
+            c_err += 1
+            predicted_dev_trees.append(create_dummy_tree(original_tree.pos()))
+            continue
+
+        tree.collapse_unary(collapsePOS=True, collapseRoot=True)
+        for x, y in zip(sorted(get_dep_triples(original_tree)), sorted(get_dep_triples(tree))):
+            if is_punctuation(x[3]):
+                # ignoring punctuations for evaluation
+                # as in previous work
+                continue
+            assert x[0] == y[0], "wrong tree!"
+            gold_dev_triples.append(f"{x[0]}-{x[1]}-{x[2]}")
+            gold_dev_triples_unlabeled.append(f"{x[0]}-{x[1]}")
+
+            predicted_dev_triples.append(f"{y[0]}-{y[1]}-{y[2]}")
+            predicted_dev_triples_unlabeled.append(f"{y[0]}-{y[1]}")
+
+    logging.warning("Number of binarization error: {}\n".format(c_err))
+    las_recall, las_precision, las_fscore, _ = precision_recall_fscore_support(
+        gold_dev_triples, predicted_dev_triples, average='micro'
+    )
+    uas_recall, uas_precision, uas_fscore, _ = precision_recall_fscore_support(
+        gold_dev_triples_unlabeled, predicted_dev_triples_unlabeled, average='micro'
+    )
+
+    return (ParseMetrics(las_recall, las_precision, las_fscore, complete_match=1),
+            ParseMetrics(uas_recall, uas_precision, uas_fscore, complete_match=1))
+
 
 
 def calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system, output_path,

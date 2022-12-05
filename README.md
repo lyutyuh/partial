@@ -40,7 +40,7 @@ python run.py train --batch-size [BATCH_SIZE]  --tagger [TAGGER] --lang [LANGUAG
 ## Evaluation
 Calculate evaluation metrics: fscore, precision, recall, loss.
 ```bash
-python run.py evaluate --lang [LANGUAGE] --model-name [MODEL]  --model-path [MODEL_PATH] --bert-model-path [BERT_PATH] --max-depth [DEPTH] --keep-per-depth [KPD]  [--is-greedy]
+python run.py evaluate --lang [LANGUAGE] --model-name [MODEL] --model-path [MODEL_PATH] --bert-model-path [BERT_PATH] --max-depth [DEPTH] --keep-per-depth [KPD]  [--is-greedy]
 ```
 - lang: language, one of the nine languages reported in the paper
 - model name: name of the checkpoint
@@ -50,3 +50,24 @@ python run.py evaluate --lang [LANGUAGE] --model-name [MODEL]  --model-path [MOD
 - keep per depth: number of elements to keep track of in the decoding step
 - is greedy: whether or not use the greedy decoding, default is false
 
+
+
+
+|    Model     |    UAS       |     LAS      |
+| -----------  | -----------  | -----------  |
+| BERT-large   |    94.22     | 95.60        | bs = 64
+| XLNet        |    95.89     | 97.01        | bs = 32 # with POS and ignore punct
+| RoBERTa      |         |         | bs = 32 not as good as XLNet
+
+
+### Commands to train the best models
+```bash
+python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 100 --batch-size 64 --lr 3e-5 --model-path bert-large-cased --output-path ./checkpoints/ --use-tensorboard True
+
+python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 50 --batch-size 32 --lr 3e-5 --model-path xlnet-large-cased --output-path ./checkpoints/ --use-tensorboard True
+
+python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 50 --batch-size 32 --lr 3e-5 --model-path roberta-large --output-path ./checkpoints/ --use-tensorboard True
+
+
+python run.py evaluate --lang English --max-depth 10 --bert-model-path bert-large-cased --model-name English-hexa-bert-3e-05-100 --batch-size 64 --model-path ./checkpoints/
+```

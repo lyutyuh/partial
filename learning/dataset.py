@@ -1,4 +1,7 @@
 import numpy as np
+import json
+import os
+
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -58,6 +61,20 @@ class TaggingDataset(torch.utils.data.Dataset):
             # To speed up training, we only train on short sentences.
             self.trees = [
                 tree for tree in self.trees if len(tree.leaves()) <= max_train_len]
+        if not os.path.exists("./pos.json") and "train" in split:
+            self.pos_dict = self.get_pos_dict()
+            with open("./pos.json", 'w') as fp:
+                json.dump(self.pos_dict, fp)
+        else:
+            with open("./pos.json", 'r') as fp:
+                self.pos_dict = json.load(fp)
+
+    def get_pos_dict(self):
+        pos_dict = {}
+        for t in self.trees:
+            for _, x in t.pos():
+                pos_dict[x] = pos_dict.get(x, 1+len(pos_dict))
+        return pos_dict
 
     def __len__(self):
         return len(self.trees)
@@ -65,8 +82,16 @@ class TaggingDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         tree = self.trees[index]
         words = ptb_unescape(tree.leaves())
+        pos_tags = [self.pos_dict.get(x[1], 0) for x in tree.pos()]
+
+        if 'albert' in str(type(self.tokenizer)):
+            # albert is case insensitive!
+            words = [w.lower() for w in words]
         encoded = self.tokenizer.encode_plus(' '.join(words))
         input_ids = torch.tensor(encoded['input_ids'], dtype=torch.long)
+        pos_ids = torch.zeros_like(input_ids).to(self.device)
+
+
         word_end_positions = [
             encoded.char_to_token(i)
             for i in np.cumsum([len(word) + 1 for word in words]) - 2]
@@ -84,6 +109,7 @@ class TaggingDataset(torch.utils.data.Dataset):
             even_labels = tag_ids[::2] - self.tag_system.decode_moderator.internal_tag_vocab_size
             labels[word_end_positions] = (
                     odd_labels * (self.tag_system.decode_moderator.leaf_tag_vocab_size + 1) + even_labels)
+            pos_ids[word_end_positions] = torch.tensor(pos_tags, dtype=torch.long).to(self.device)
         else:
             even_labels = tag_ids[::2]
             labels[word_end_positions] = (
@@ -94,23 +120,32 @@ class TaggingDataset(torch.utils.data.Dataset):
             assert pad_amount >= 0
             if pad_amount != 0:
                 input_ids = F.pad(input_ids, [0, pad_amount], value=self.pad_token_id)
+                pos_ids = F.pad(pos_ids, [0, pad_amount], value=0)
                 labels = F.pad(labels, [0, pad_amount], value=0)
 
-        return {'input_ids': input_ids, 'labels': labels}
+        return {
+            'input_ids': input_ids,
+            'pos_ids': pos_ids,
+            'labels': labels
+        }
 
     def collate(self, batch):
         input_ids = pad_sequence(
             [item['input_ids'] for item in batch],
             batch_first=True, padding_value=self.pad_token_id)
+        pos_ids = pad_sequence(
+            [item['pos_ids'] for item in batch],
+            batch_first=True, padding_value=0) # 0 for UNK POS
         labels = pad_sequence(
             [item['labels'] for item in batch],
             batch_first=True, padding_value=0)
 
         input_ids = input_ids.to(self.device)
-        attention_mask = (input_ids != self.pad_token_id)
+        attention_mask = (input_ids != self.pad_token_id).float()
         labels = labels.to(self.device)
         return {
             'input_ids': input_ids,
+            'pos_ids': pos_ids,
             'attention_mask': attention_mask,
             'labels': labels,
         }

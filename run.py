@@ -15,7 +15,7 @@ from transformers import AdamW
 
 from const import *
 from learning.dataset import TaggingDataset
-from learning.evaluate import predict, calc_parse_eval, calc_tag_accuracy, report_eval_loss
+from learning.evaluate import predict, dependency_eval, calc_parse_eval, calc_tag_accuracy, report_eval_loss
 from learning.learn import ModelForTetratagging, BertCRFModel, BertLSTMModel
 from tagging.hexatagger import HexaTagger
 from tagging.srtagger import SRTaggerBottomUp, SRTaggerTopDown
@@ -138,7 +138,8 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
     train_dataset = TaggingDataset(lang + '.train', tokenizer, tag_system, reader, device,
                                    is_tetratags=is_tetratags)
     eval_dataset = TaggingDataset(lang + '.dev', tokenizer, tag_system, reader, device,
-                                  pad_to_len=256, is_tetratags=is_tetratags)
+                                  pad_to_len=256,
+                                  is_tetratags=is_tetratags)
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate
     )
@@ -150,10 +151,12 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
 
 def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER else False
+    print(model_name, tagging_schema)
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
     test_dataset = TaggingDataset(lang + '.test', tokenizer, tag_system, reader, device,
-                                  pad_to_len=256, is_tetratags=is_tetratags)
+                                  pad_to_len=256,
+                                  is_tetratags=is_tetratags)
     test_dataloader = DataLoader(
         test_dataset, batch_size=batch_size, collate_fn=test_dataset.collate
     )
@@ -181,7 +184,8 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
                 'model_path': model_path,
                 'num_even_tags': tag_system.decode_moderator.leaf_tag_vocab_size,
                 'num_odd_tags': tag_system.decode_moderator.internal_tag_vocab_size,
-                'is_eng': is_eng
+                'is_eng': is_eng,
+                'use_pos': True
             }
         )
     elif model_type in BERT and tagging_schema != TETRATAGGER and tagging_schema != HEXATAGGER:
@@ -219,8 +223,7 @@ def initialize_optimizer_and_scheduler(model, dataset_size, lr=5e-5, num_epochs=
                                        num_warmup_steps=160, weight_decay_rate=0.0):
     num_training_steps = num_epochs * dataset_size
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay_rate)
-    scheduler = transformers.get_scheduler(
-        "constant_with_warmup",
+    scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer=optimizer,
         num_warmup_steps=num_warmup_steps,
         num_training_steps=num_training_steps
@@ -265,27 +268,34 @@ def train(args):
         writer = SummaryWriter(comment=run_name)
 
     num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
-    model = torch.nn.DataParallel(model)
+    # model = torch.nn.DataParallel(model)
+
     model.to(device)
+
     logging.info("Starting The Training Loop")
     model.train()
     n_iter = 0
 
-    when_to_eval = int(len(train_dataset) / (4 * args.batch_size))
+    when_to_eval = int(len(train_dataset) / (args.batch_size))
     best_eval_loss = np.inf
     last_eval_loss = np.inf
     last_fscore = 0
     best_fscore = 0
-    tol = 5
+    tol = 99999
 
-    for _ in tq(range(args.epochs)):
-        t = 0
+    for epo in tq(range(args.epochs)):
+        logging.info(f"*******************EPOCH {epo}*******************")
+        t = 1
         for batch in tq(train_dataloader):
             optimizer.zero_grad()
             model.train()
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            outputs = model(**batch)
+            # faster on 3090/a100
+            with torch.cuda.amp.autocast(
+                enabled=True, dtype=torch.bfloat16
+            ):
+                outputs = model(**batch)
             loss = outputs[0]
             loss.mean().backward()
             if args.use_tensorboard:
@@ -295,15 +305,37 @@ def train(args):
             optimizer.step()
             scheduler.step()
 
-            if t % when_to_eval == 0:
-                predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                                   num_tags, args.batch_size,
-                                                   device)
-                dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
-                                              tag_system, None,
-                                              "", args.max_depth, args.keep_per_depth, False)
-                eval_loss = report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+            n_iter += 1
+            t += 1
 
+        if True: # evaluation at the end of epoch
+            predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
+                                               num_tags, args.batch_size,
+                                               device)
+            if args.tagger == HEXATAGGER:
+                dev_metrics_las, dev_metrics_uas = dependency_eval(
+                    predictions, eval_labels, eval_dataset,
+                    tag_system, None, "", args.max_depth,
+                    args.keep_per_depth, False)
+            else:
+                dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
+                                          tag_system, None,
+                                          "", args.max_depth, args.keep_per_depth, False)
+            eval_loss = 0.5 # report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+
+            if args.tagger == HEXATAGGER:
+                writer.add_scalar('LAS_Fscore/dev', dev_metrics_las.fscore, n_iter)
+                writer.add_scalar('LAS_Precision/dev', dev_metrics_las.precision, n_iter)
+                writer.add_scalar('LAS_Recall/dev', dev_metrics_las.recall, n_iter)
+                writer.add_scalar('loss/dev', eval_loss, n_iter)
+
+                logging.info("current LAS fscore {}".format(dev_metrics_las.fscore))
+                logging.info("current UAS fscore {}".format(dev_metrics_uas.fscore))
+                logging.info("last LAS fscore {}".format(last_fscore))
+                logging.info("best LAS fscore {}".format(best_fscore))
+                # setting main metric for model selection
+                dev_metrics = dev_metrics_las
+            else:
                 writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
                 writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
@@ -312,27 +344,28 @@ def train(args):
                 logging.info("current fscore {}".format(dev_metrics.fscore))
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
-                if eval_loss < last_eval_loss:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
-                    tol = 5
-                    logging.info("tol refill")
-                    if eval_loss < best_eval_loss:  #if dev_metrics.fscore > best_fscore:
-                        logging.info("save the best model")
-                        best_eval_loss = eval_loss
-                        _save_best_model(model, args.output_path, run_name)
-                elif eval_loss > 0: #dev_metrics.fscore
-                    tol -= 1
-                    for g in optimizer.param_groups:
-                        g['lr'] = g['lr'] / 2.
 
-                if tol < 0:
-                    _finish_training(model, tag_system, eval_dataloader,
-                                     eval_dataset, eval_loss, run_name, writer, args)
-                    return
-                if eval_loss > 0:  # not propagating the nan
-                    last_eval_loss = eval_loss
+            if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
+                tol = 99999
+                logging.info("tol refill")
+                logging.info("save the best model")
+                best_eval_loss = eval_loss
+                best_fscore = dev_metrics.fscore
+                _save_best_model(model, args.output_path, run_name)
+            elif eval_loss > 0: # dev_metrics.fscore
+                tol -= 1
+                for g in optimizer.param_groups:
+                    g['lr'] = g['lr'] / 2.
 
-            n_iter += 1
-            t += 1
+            if tol < 0:
+                _finish_training(model, tag_system, eval_dataloader,
+                                 eval_dataset, eval_loss, run_name, writer, args)
+                return
+            if eval_loss > 0:  # not propagating the nan
+                last_eval_loss = eval_loss
+
+            # end of epoch
+            pass
 
     _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
                      run_name, writer, args)
@@ -405,13 +438,25 @@ def evaluate(args):
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, args.batch_size, device)
     calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
-    parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system,
-                                    args.output_path,
-                                    args.model_name,
-                                    args.max_depth,
-                                    args.keep_per_depth,
-                                    args.is_greedy)  # TODO: missing CRF transition matrix
-    print(parse_metrics)
+    if tagging_schema == HEXATAGGER:
+        dev_metrics_las, dev_metrics_uas = dependency_eval(predictions, eval_labels, eval_dataset, tag_system,
+                                        args.output_path,
+                                        args.model_name,
+                                        args.max_depth,
+                                        args.keep_per_depth,
+                                        args.is_greedy)  # TODO: missing CRF transition matrix
+        print(
+            "LAS:", dev_metrics_las,
+            "UAS:", dev_metrics_uas
+        )
+    else:
+        parse_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset, tag_system,
+                                        args.output_path,
+                                        args.model_name,
+                                        args.max_depth,
+                                        args.keep_per_depth,
+                                        args.is_greedy)  # TODO: missing CRF transition matrix
+        print(parse_metrics)
 
 
 def main():

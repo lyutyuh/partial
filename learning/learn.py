@@ -1,6 +1,7 @@
 import torch
 from torch import nn
-from transformers import BertForTokenClassification
+
+from transformers import AutoConfig, AutoModelForTokenClassification, AutoModel
 
 from learning.crf import CRF
 
@@ -43,11 +44,12 @@ class BertCRFModel(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
-                                                                     config=config)
+            self.bert = AutoModelForTokenClassification.from_pretrained(
+                self.model_path, config=config)
         else:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = AutoModelForTokenClassification.from_pretrained(self.model_path,
                                                                          config=config)
+
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.crf = CRF(
             self.num_tags,
@@ -102,10 +104,10 @@ class BertLSTMModel(nn.Module):
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = AutoModelForTokenClassification.from_pretrained(self.model_path,
                                                                      config=config)
         else:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
+            self.bert = AutoModelForTokenClassification.from_pretrained(self.model_path,
                                                                          config=config)
         self.lstm = nn.LSTM(
             self.num_tags, self.num_tags, 2, batch_first=True, bidirectional=True,
@@ -151,16 +153,26 @@ class ModelForTetratagging(nn.Module):
         self.num_odd_tags = config.task_specific_params['num_odd_tags']
         self.model_path = config.task_specific_params['model_path']
         is_eng = config.task_specific_params['is_eng']
+        self.use_pos = config.task_specific_params.get('use_pos', False)
+        if self.use_pos:
+            self.pos_encoder = nn.Sequential(
+                nn.Embedding(50, 256, padding_idx=0)
+            )
         if is_eng:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
-                                                                     config=config)
+            self.bert = AutoModel.from_pretrained(self.model_path,
+                                                  config=config)
         else:
-            self.bert = BertForTokenClassification.from_pretrained(self.model_path,
-                                                                         config=config)
+            self.bert = AutoModel.from_pretrained(self.model_path,
+                                                  config=config)
+        self.projection = nn.Sequential(
+            nn.Dropout(p=(1. / 3.)), # default dr in: https://github.com/yzhangcs/parser/blob/main/supar/model.py
+            nn.Linear(config.hidden_size+(256*self.use_pos), config.num_labels)
+        )
 
     def forward(
             self,
             input_ids=None,
+            pos_ids=None,
             attention_mask=None,
             head_mask=None,
             inputs_embeds=None,
@@ -168,7 +180,7 @@ class ModelForTetratagging(nn.Module):
             output_attentions=None,
             output_hidden_states=None,
     ):
-        outputs = self.bert.forward(
+        outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
             head_mask=head_mask,
@@ -176,9 +188,18 @@ class ModelForTetratagging(nn.Module):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
         )
+        if self.use_pos:
+            pos_encodings = self.pos_encoder(pos_ids)
+            token_repr = torch.cat([outputs[0], pos_encodings], dim=-1)
+        else:
+            token_repr = outputs[0]
+
+        tag_logits = self.projection(
+            token_repr
+        )
 
         loss = None
         if labels is not None:
-            loss = calc_loss_helper(outputs[0], labels, attention_mask, self.num_even_tags,
+            loss = calc_loss_helper(tag_logits, labels, attention_mask, self.num_even_tags,
                                     self.num_odd_tags)
-        return loss, outputs[0]
+        return loss, tag_logits
