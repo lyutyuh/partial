@@ -64,10 +64,13 @@ python run.py evaluate --lang [LANGUAGE] --model-name [MODEL] --model-path [MODE
 ```bash
 python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 100 --batch-size 64 --lr 3e-5 --model-path bert-large-cased --output-path ./checkpoints/ --use-tensorboard True
 
+# The best one:
 python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 50 --batch-size 32 --lr 3e-5 --model-path xlnet-large-cased --output-path ./checkpoints/ --use-tensorboard True
 
 python run.py train --lang English --max-depth 10 --tagger hexa --model bert --epochs 50 --batch-size 32 --lr 3e-5 --model-path roberta-large --output-path ./checkpoints/ --use-tensorboard True
+```
 
-
+### Commands to evaluate
+```bash
 python run.py evaluate --lang English --max-depth 10 --bert-model-path bert-large-cased --model-name English-hexa-bert-3e-05-100 --batch-size 64 --model-path ./checkpoints/
 ```
