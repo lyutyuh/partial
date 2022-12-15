@@ -28,7 +28,12 @@ random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 print('Random seed: {}'.format(RANDOM_SEED), file=sys.stderr)
 
-logging.getLogger().setLevel(logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
+logger = logging.getLogger(__file__)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -49,7 +54,7 @@ train.add_argument('--tagger', choices=[TETRATAGGER, TD_SR, BU_SR, HEXATAGGER], 
                    help="Tagging schema")
 train.add_argument('--lang', choices=LANG, default=ENG, help="Language")
 train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
-train.add_argument('--model', choices= BERT + BERTCRF + BERTLSTM, required=True,
+train.add_argument('--model', choices=BERT + BERTCRF + BERTLSTM, required=True,
                    help="Model architecture")
 
 
@@ -68,8 +73,8 @@ train.add_argument('--keep-per-depth', type=int, default=1,
                    help="Max elements to keep per depth")
 
 train.add_argument('--lr', type=float, default=5e-5)
-train.add_argument('--epochs', type=int, default=4)
-train.add_argument('--batch-size', type=int, default=16)
+train.add_argument('--epochs', type=int, default=50)
+train.add_argument('--batch-size', type=int, default=32)
 train.add_argument('--num-warmup-steps', type=int, default=160)
 train.add_argument('--weight-decay', type=float, default=0.01)
 
@@ -85,7 +90,7 @@ evaluate.add_argument('--max-depth', type=int, default=5,
 evaluate.add_argument('--is-greedy', type=bool, default=False,
                       help="Whether or not to use greedy decoding")
 evaluate.add_argument('--keep-per-depth', type=int, default=1,
-                   help="Max elements to keep per depth")
+                      help="Max elements to keep per depth")
 evaluate.add_argument('--use-tensorboard', type=bool, default=False,
                       help="Whether to use the tensorboard for logging the results make sure "
                            "to add credentials to run.py if set to true")
@@ -109,22 +114,29 @@ def initialize_tag_system(reader, tagging_schema, lang, tag_vocab_path="",
         tag_system = BottomUpTetratagger(trees=reader.parsed_sents(lang + '.train'),
                                          tag_vocab=tag_vocab, add_remove_top=add_remove_top)
     elif tagging_schema == HEXATAGGER:
-        tag_system = HexaTagger(trees=reader.parsed_sents(lang + '.train'),
-                                         tag_vocab=tag_vocab, add_remove_top=add_remove_top)
+        # for lexicalized tree
+        tag_system = HexaTagger(trees=reader.parsed_sents(lang + '.lex.train'),
+                                tag_vocab=tag_vocab, add_remove_top=add_remove_top)
     else:
         logging.error("Please specify the tagging schema")
         return
     return tag_system
+
 
 def get_data_path(tagger):
     if tagger == HEXATAGGER:
         return DEP_DATA_PATH
     return DATA_PATH
 
+
 def save_vocab(args):
     data_path = get_data_path(args.tagger)
-    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
-                                                  args.lang + '.test'])
+    if args.tagger == HEXATAGGER:
+        prefix = args.lang + ".lex"
+    else:
+        prefix = args.lang
+    reader = BracketParseCorpusReader(
+        data_path, [prefix+'.train', prefix+'.dev', prefix+'.test'])
     tag_system = initialize_tag_system(reader, args.tagger, args.lang,
                                        add_remove_top=args.lang == ENG)
     with open(args.output_path + args.lang + "-" + args.tagger + '.pkl', 'wb') as f:
@@ -133,11 +145,12 @@ def save_vocab(args):
 
 def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER else False
+    prefix = lang + ".lex" if tagging_schema == HEXATAGGER else lang
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    train_dataset = TaggingDataset(lang + '.train', tokenizer, tag_system, reader, device,
+    train_dataset = TaggingDataset(prefix + '.train', tokenizer, tag_system, reader, device,
                                    is_tetratags=is_tetratags)
-    eval_dataset = TaggingDataset(lang + '.dev', tokenizer, tag_system, reader, device,
+    eval_dataset = TaggingDataset(prefix + '.test', tokenizer, tag_system, reader, device,
                                   pad_to_len=256,
                                   is_tetratags=is_tetratags)
     train_dataloader = DataLoader(
@@ -151,10 +164,12 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
 
 def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
     is_tetratags = True if tagging_schema == TETRATAGGER or tagging_schema == HEXATAGGER else False
-    print(model_name, tagging_schema)
+    prefix = lang + ".lex" if tagging_schema == HEXATAGGER else lang
+
+    print(f"Evaluating {model_name}, {tagging_schema}")
     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name, truncation=True,
                                                            use_fast=True)
-    test_dataset = TaggingDataset(lang + '.test', tokenizer, tag_system, reader, device,
+    test_dataset = TaggingDataset(prefix+'.test', tokenizer, tag_system, reader, device,
                                   pad_to_len=256,
                                   is_tetratags=is_tetratags)
     test_dataloader = DataLoader(
@@ -178,8 +193,10 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
         config = transformers.AutoConfig.from_pretrained(
             model_path,
             num_labels=len(tag_system.tag_vocab),
-            id2label={i: label for i, label in enumerate(tag_system.tag_vocab)},
-            label2id={label: i for i, label in enumerate(tag_system.tag_vocab)},
+            id2label={i: label for i, label in enumerate(
+                tag_system.tag_vocab)},
+            label2id={label: i for i, label in enumerate(
+                tag_system.tag_vocab)},
             task_specific_params={
                 'model_path': model_path,
                 'num_even_tags': tag_system.decode_moderator.leaf_tag_vocab_size,
@@ -206,7 +223,8 @@ def generate_config(model_type, tagging_schema, tag_system, model_path, is_eng):
 
 
 def initialize_model(model_type, tagging_schema, tag_system, model_path, is_eng):
-    config = generate_config(model_type, tagging_schema, tag_system, model_path, is_eng)
+    config = generate_config(model_type, tagging_schema,
+                             tag_system, model_path, is_eng)
     if model_type in BERTCRF:
         model = BertCRFModel(config=config)
     elif model_type in BERTLSTM:
@@ -222,7 +240,8 @@ def initialize_model(model_type, tagging_schema, tag_system, model_path, is_eng)
 def initialize_optimizer_and_scheduler(model, dataset_size, lr=5e-5, num_epochs=4,
                                        num_warmup_steps=160, weight_decay_rate=0.0):
     num_training_steps = num_epochs * dataset_size
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay_rate)
+    optimizer = AdamW(model.parameters(), lr=lr,
+                      weight_decay=weight_decay_rate)
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer=optimizer,
         num_warmup_steps=num_warmup_steps,
@@ -240,9 +259,13 @@ def register_run_metrics(writer, run_name, lr, epochs, eval_loss, even_tag_accur
 
 
 def train(args):
+    if args.tagger == HEXATAGGER:
+        prefix = args.lang + ".lex"
+    else:
+        prefix = args.lang
     data_path = get_data_path(args.tagger)
-    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
-                                                  args.lang + '.test'])
+    reader = BracketParseCorpusReader(data_path, [prefix + '.train', prefix + '.dev',
+                                                  prefix + '.test'])
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, args.tagger, args.lang,
                                        tag_vocab_path=args.tag_vocab_path,
@@ -253,7 +276,8 @@ def train(args):
         tag_system, args.tagger, args.model_path, args.batch_size, args.lang)
     logging.info("Initializing The Model")
     is_eng = True if args.lang == ENG else False
-    model = initialize_model(args.model, args.tagger, tag_system, args.model_path, is_eng)
+    model = initialize_model(args.model, args.tagger,
+                             tag_system, args.model_path, is_eng)
     train_set_size = len(train_dataloader)
     optimizer, scheduler, num_training_steps = initialize_optimizer_and_scheduler(model,
                                                                                   train_set_size,
@@ -308,7 +332,7 @@ def train(args):
             n_iter += 1
             t += 1
 
-        if True: # evaluation at the end of epoch
+        if True:  # evaluation at the end of epoch
             predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                                num_tags, args.batch_size,
                                                device)
@@ -319,25 +343,32 @@ def train(args):
                     args.keep_per_depth, False)
             else:
                 dev_metrics = calc_parse_eval(predictions, eval_labels, eval_dataset,
-                                          tag_system, None,
-                                          "", args.max_depth, args.keep_per_depth, False)
-            eval_loss = 0.5 # report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+                                              tag_system, None,
+                                              "", args.max_depth, args.keep_per_depth, False)
+            # report_eval_loss(model, eval_dataloader, device, n_iter, writer)
+            eval_loss = 0.5
 
             if args.tagger == HEXATAGGER:
-                writer.add_scalar('LAS_Fscore/dev', dev_metrics_las.fscore, n_iter)
-                writer.add_scalar('LAS_Precision/dev', dev_metrics_las.precision, n_iter)
-                writer.add_scalar('LAS_Recall/dev', dev_metrics_las.recall, n_iter)
+                writer.add_scalar('LAS_Fscore/dev',
+                                  dev_metrics_las.fscore, n_iter)
+                writer.add_scalar('LAS_Precision/dev',
+                                  dev_metrics_las.precision, n_iter)
+                writer.add_scalar('LAS_Recall/dev',
+                                  dev_metrics_las.recall, n_iter)
                 writer.add_scalar('loss/dev', eval_loss, n_iter)
 
-                logging.info("current LAS fscore {}".format(dev_metrics_las.fscore))
-                logging.info("current UAS fscore {}".format(dev_metrics_uas.fscore))
+                logging.info("current LAS fscore {}".format(
+                    dev_metrics_las.fscore))
+                logging.info("current UAS fscore {}".format(
+                    dev_metrics_uas.fscore))
                 logging.info("last LAS fscore {}".format(last_fscore))
                 logging.info("best LAS fscore {}".format(best_fscore))
                 # setting main metric for model selection
                 dev_metrics = dev_metrics_las
             else:
                 writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
-                writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
+                writer.add_scalar(
+                    'Precision/dev', dev_metrics.precision, n_iter)
                 writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
                 writer.add_scalar('loss/dev', eval_loss, n_iter)
 
@@ -345,14 +376,15 @@ def train(args):
                 logging.info("last fscore {}".format(last_fscore))
                 logging.info("best fscore {}".format(best_fscore))
 
-                if dev_metrics.fscore > last_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
+                # if dev_metrics.fscore > last_fscore or dev_loss < last...
+                if dev_metrics.fscore > last_fscore:
                     tol = 5
                     logging.info("tol refill")
-                    if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > best_fscore:
+                    if dev_metrics.fscore > best_fscore:  # if dev_metrics.fscore > best_fscore:
                         logging.info("save the best model")
                         best_fscore = dev_metrics.fscore
                         _save_best_model(model, args.output_path, run_name)
-                elif dev_metrics.fscore > 0: #dev_metrics.fscore
+                elif dev_metrics.fscore > 0:  # dev_metrics.fscore
                     tol -= 1
                     for g in optimizer.param_groups:
                         g['lr'] = g['lr'] / 2.
@@ -365,14 +397,15 @@ def train(args):
                     last_eval_loss = eval_loss
                     last_fscore = dev_metrics.fscore
 
-            if dev_metrics.fscore > best_fscore:  #if dev_metrics.fscore > last_fscore or dev_loss < last...
+            # if dev_metrics.fscore > last_fscore or dev_loss < last...
+            if dev_metrics.fscore > best_fscore:
                 tol = 99999
                 logging.info("tol refill")
                 logging.info("save the best model")
                 best_eval_loss = eval_loss
                 best_fscore = dev_metrics.fscore
                 _save_best_model(model, args.output_path, run_name)
-            elif eval_loss > 0: # dev_metrics.fscore
+            elif eval_loss > 0:  # dev_metrics.fscore
                 tol -= 1
                 for g in optimizer.param_groups:
                     g['lr'] = g['lr'] / 2.
@@ -404,7 +437,8 @@ def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss
                                        device)
     even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
                                           args.use_tensorboard)
-    register_run_metrics(writer, run_name, args.lr, args.epochs, eval_loss, even_acc, odd_acc)
+    register_run_metrics(writer, run_name, args.lr,
+                         args.epochs, eval_loss, even_acc, odd_acc)
 
 
 def decode_model_name(model_name):
@@ -431,20 +465,24 @@ def calc_num_tags_per_task(tagging_schema, tag_system):
 
 def evaluate(args):
     tagging_schema, model_type = decode_model_name(args.model_name)
-    data_path = get_data_path(tagging_schema)
-    reader = BracketParseCorpusReader(data_path, [args.lang + '.train', args.lang + '.dev',
-                                                  args.lang + '.test'])
+    data_path = get_data_path(tagging_schema)  # HexaTagger or others
+    if args.tagger == HEXATAGGER:
+        prefix = args.lang + ".lex"
+    else:
+        prefix = args.lang
+    reader = BracketParseCorpusReader(
+        data_path,
+        [prefix + '.train', prefix + '.dev', prefix + '.test'])
     writer = SummaryWriter(comment=args.model_name)
     logging.info("Initializing Tag System")
     tag_system = initialize_tag_system(reader, tagging_schema, args.lang,
                                        tag_vocab_path=args.tag_vocab_path,
                                        add_remove_top=args.lang == ENG)
     logging.info("Preparing Data")
-    eval_dataset, eval_dataloader = prepare_test_data(reader,
-                                                      tag_system, tagging_schema,
-                                                      args.bert_model_path,
-                                                      args.batch_size,
-                                                      args.lang)
+    eval_dataset, eval_dataloader = prepare_test_data(
+        reader, tag_system, tagging_schema,
+        args.bert_model_path, args.batch_size,
+        args.lang)
 
     is_eng = True if args.lang == ENG else False
     model = initialize_model(model_type, tagging_schema, tag_system, args.bert_model_path,
@@ -453,18 +491,20 @@ def evaluate(args):
     model.load_state_dict(torch.load(args.model_path + args.model_name))
     model.to(device)
 
-    num_leaf_labels, num_tags = calc_num_tags_per_task(tagging_schema, tag_system)
+    num_leaf_labels, num_tags = calc_num_tags_per_task(
+        tagging_schema, tag_system)
 
     predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
                                        num_tags, args.batch_size, device)
-    calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer, args.use_tensorboard)
+    calc_tag_accuracy(predictions, eval_labels,
+                      num_leaf_labels, writer, args.use_tensorboard)
     if tagging_schema == HEXATAGGER:
         dev_metrics_las, dev_metrics_uas = dependency_eval(predictions, eval_labels, eval_dataset, tag_system,
-                                        args.output_path,
-                                        args.model_name,
-                                        args.max_depth,
-                                        args.keep_per_depth,
-                                        args.is_greedy)  # TODO: missing CRF transition matrix
+                                                           args.output_path,
+                                                           args.model_name,
+                                                           args.max_depth,
+                                                           args.keep_per_depth,
+                                                           args.is_greedy)  # TODO: missing CRF transition matrix
         print(
             "LAS:", dev_metrics_las,
             "UAS:", dev_metrics_uas
