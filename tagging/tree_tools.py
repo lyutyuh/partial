@@ -26,7 +26,8 @@ def find_node_type(node: ParentedTree) -> NodeType:
 
 
 def is_node_epsilon(node: ParentedTree) -> bool:
-    if len(node.leaves()) == 1 and node.leaves()[0] == "EPS":
+    node_leaves = node.leaves()
+    if len(node_leaves) == 1 and node_leaves[0] == "EPS":
         return True
     return False
 

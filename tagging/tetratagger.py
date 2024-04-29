@@ -5,6 +5,9 @@ import numpy as np
 from nltk import ParentedTree as PTree
 from nltk import Tree
 
+import torch
+import torch.nn.functional as F
+
 from learning.decode import BeamSearch, GreedySearch
 from tagging.tagger import Tagger, TagDecodeModerator
 from tagging.transform import LeftCornerTransformer, RightCornerTransformer
@@ -12,7 +15,7 @@ from tagging.tree_tools import find_node_type, is_node_epsilon, NodeType
 
 
 class TetraTagDecodeModerator(TagDecodeModerator):
-    def __init__(self, tag_vocab):
+    def __init__(self, tag_vocab, max_stack_depth=10):
         super().__init__(tag_vocab)
         self.internal_tag_vocab_size = len(
             [tag for tag in tag_vocab if tag[0] in "LR"]
@@ -28,9 +31,7 @@ class TetraTagDecodeModerator(TagDecodeModerator):
             ]
         )
         self.internal_tags_only = np.asarray(-1e9 * is_leaf_mask, dtype=float)
-        self.leaf_tags_only = np.asarray(
-            -1e9 * (1 - is_leaf_mask), dtype=float
-        )
+        self.leaf_tags_only = np.asarray(-1e9 * (1 - is_leaf_mask), dtype=float)
 
         stack_depth_change_by_id = [None] * len(tag_vocab)
         for i, tag in enumerate(tag_vocab):
@@ -44,13 +45,36 @@ class TetraTagDecodeModerator(TagDecodeModerator):
         self.stack_depth_change_by_id = np.array(
             stack_depth_change_by_id, dtype=np.int32
         )
+
+        self.max_stack_depth = max_stack_depth
+        self.stack_depth_change_matrix = self.get_stack_depth_change_matrix(max_stack_depth, tag_vocab)
+        self.internal_tags_only_tensor = torch.from_numpy(self.internal_tags_only)
+        self.leaf_tags_only_tensor = torch.from_numpy(self.leaf_tags_only)
+
         self.mask_binarize = False
+
+    def get_stack_depth_change_matrix(self, max_stack_depth, tag_vocab):
+        stack_depth_change_matrix = torch.full(
+            (len(tag_vocab), max_stack_depth + 1, max_stack_depth + 1), -1e4,
+            dtype=torch.float
+        )
+        for i, tag in enumerate(tag_vocab):
+            if tag.startswith("l"):
+                stack_depth_change_matrix[i].diagonal(1).fill_(0)
+            elif tag.startswith("R"):
+                stack_depth_change_matrix[i].diagonal(-1).fill_(0)
+            else:
+                stack_depth_change_matrix[i].diagonal(0).fill_(0)
+        return stack_depth_change_matrix
 
 
 class TetraTagger(Tagger, ABC):
-    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False):
+    def __init__(self, trees=None, tag_vocab=None, add_remove_top=False, max_stack_depth=10):
         super().__init__(trees, tag_vocab, add_remove_top)
-        self.decode_moderator = TetraTagDecodeModerator(self.tag_vocab)
+        self.max_stack_depth = max_stack_depth
+        self.decode_moderator = TetraTagDecodeModerator(
+            self.tag_vocab, max_stack_depth=max_stack_depth
+        )
 
     def expand_tags(self, tags: [str]) -> [str]:
         raise NotImplementedError("expand tags is not implemented")
@@ -167,6 +191,63 @@ class TetraTagger(Tagger, ABC):
 
         score, best_tag_ids = searcher.get_path()
         return best_tag_ids
+
+
+    def inside(
+        self,
+        logits, # shape: (batch_size, seq_len, num_tags)
+        mask_even, # shape: (batch_size, seq_len)
+        mask_odd # shape: (batch_size, seq_len)
+    ):
+        # seq_len is also the maximum depth of stack
+        batch_size, seq_len, num_tags = logits.size()
+        # shape: (batch_size, stack_depth, 1)
+        inside_score = torch.cat(
+            [
+                logits.new_zeros(batch_size, 1, 1),
+                logits.new_full((batch_size, self.max_stack_depth, 1), -1e4)
+            ], dim=1
+        )
+        # shape: (batch_size, num_tags, stack_depth, stack_depth), float
+        depth_change_matrix = self.decode_moderator.stack_depth_change_matrix.type_as(logits).unsqueeze(0)
+        internal_tags_only_mask = self.decode_moderator.internal_tags_only_tensor.type_as(logits).unsqueeze(0).unsqueeze(0)
+        leaf_tags_only_mask = self.decode_moderator.leaf_tags_only_tensor.type_as(logits).unsqueeze(0).unsqueeze(0)
+        # shape: (batch_size, seq_len, num_tags)
+        logits_even = logits + leaf_tags_only_mask
+        logits_odd = logits + internal_tags_only_mask
+
+        for t in range(logits.size(1)):
+            # shape: (batch_size, num_tags)
+            increment = logits_even.select(1, t)
+            # shape: (batch_size, stack_depth, 1)
+            new_inside_score = self.update_inside_score(num_tags, inside_score, increment, depth_change_matrix)
+            inside_score = torch.where(mask_even.select(1, t).unsqueeze(-1).unsqueeze(-1), new_inside_score, inside_score)
+
+            # shape: (batch_size, num_tags)
+            increment = logits_odd.select(1, t)
+            # shape: (batch_size, stack_depth, 1)
+            new_inside_score = self.update_inside_score(num_tags, inside_score, increment, depth_change_matrix)
+            inside_score = torch.where(mask_odd.select(1, t).unsqueeze(-1).unsqueeze(-1), new_inside_score, inside_score)
+
+        # return the score at depth 1: The root is L. Complete trees have depth 1.
+        return inside_score[:,1,0]
+
+
+    def update_inside_score(self, num_tags, inside_score, increment, depth_change_matrix):
+        batch_size, stack_depth, _ = inside_score.size()
+        # shape: (batch_size, num_tags, stack_depth, stack_depth) - in the log space
+        weighted_depth_change_matrix = depth_change_matrix + increment.unsqueeze(2).unsqueeze(3)
+        # shape: (batch_size, stack_depth, stack_depth)
+        weighted_depth_change_matrix = logsumexp(weighted_depth_change_matrix, dim=1)
+
+        # shape: (batch_size, stack_depth, stack_depth) - in the log space
+        expanded_inside_score = (inside_score + weighted_depth_change_matrix)
+        # shape: (batch_size, stack_depth)
+        inside_score = logsumexp(expanded_inside_score, dim=1)
+        # shape: (batch_size, stack_depth, 1)
+        inside_score = inside_score.unsqueeze(-1)
+
+        return inside_score
 
 
 class BottomUpTetratagger(TetraTagger):
@@ -392,3 +473,12 @@ class TopDownTetratagger(TetraTagger):
         if len(input_seq) != 0:
             raise ValueError("All the input sequence is not used")
         return root
+
+
+def logsumexp(tensor: torch.Tensor, dim: int = -1, keepdim: bool = False) -> torch.Tensor:
+    max_score, _ = tensor.max(dim, keepdim=keepdim)
+    if keepdim:
+        stable_vec = tensor - max_score
+    else:
+        stable_vec = tensor - max_score.unsqueeze(dim)
+    return max_score + stable_vec.logsumexp(dim=dim, keepdim=keepdim)

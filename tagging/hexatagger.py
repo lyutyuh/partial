@@ -13,10 +13,6 @@ class HexaTagger(BottomUpTetratagger, ABC):
     def preprocess(self, original_tree: Tree) -> PTree:
         tree = original_tree.copy(deep=True)
         tree.collapse_unary(collapsePOS=True, collapseRoot=True)
-        # tree.pretty_print()
-        # new_root = Tree(tree.label(), [])
-        # new_root = binarize_lex_tree(tree, new_root, "X")
-        # new_root.pretty_print()
 
         ptree = PTree.convert(tree)
         root_label = ptree.label()
@@ -54,19 +50,6 @@ class HexaTagger(BottomUpTetratagger, ABC):
         ptree = self.tags_to_tree(tags, input_seq)
         return self.postprocess(ptree)
 
-    # @staticmethod
-    # def _create_pre_terminal_label(tag: str, default="X") -> str:
-    #     idx = tag.find("/")
-    #     arc_label = tag.split("/")[1]
-    #     if idx != -1:
-    #         label = tag[idx + 1:].replace("/", "+")
-    #         if default == "":
-    #             return label + "+"
-    #         else:
-    #             return label
-    #     else:
-    #         return default
-
     @staticmethod
     def _create_pre_terminal_label(tag: str, default="X") -> str:
         arc_label = tag.split("/")[1]
@@ -102,8 +85,3 @@ class HexaTagger(BottomUpTetratagger, ABC):
         expand_unary(debinarized_tree)
         # debinarized_tree.pretty_print()
         return debinarized_tree
-
-    # def logits_to_tree(self, logits: [], leave_nodes: [], mask=None, max_depth=5, keep_per_depth=1, is_greedy=False) -> Tree:
-    #     ids = self.logits_to_ids(logits, mask, max_depth, keep_per_depth, is_greedy=is_greedy)
-    #     # input_seq = [(word, "") for (word, pos) in leave_nodes]
-    #     return self.ids_to_tree_pipeline(ids, leave_nodes)

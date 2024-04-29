@@ -14,7 +14,7 @@ class Transformer:
 
     @classmethod
     def extract_right_corner(cls, node: PTree) -> PTree:
-        while type(node[0]) != str:
+        while type(node[0]) == PTree:
             if len(node) > 1:
                 node = node[1]
             else:  # unary rules
