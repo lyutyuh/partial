@@ -1,9 +1,11 @@
+import sys
+import os
 import argparse
 import logging
 import pickle
 import random
-import sys
 import time
+import json
 
 import numpy as np
 import torch
@@ -32,7 +34,6 @@ RANDOM_SEED = 1
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
-print('Random seed: {}'.format(RANDOM_SEED), file=sys.stderr)
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -40,6 +41,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__file__)
+logger.info('Random seed: {}'.format(RANDOM_SEED))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -225,7 +227,7 @@ def generate_config(args, model_type, tagging_schema, tag_system, model_path, is
                 'model_path': model_path,
                 'pos_emb_dim': 256,
                 'num_pos_tags': 50,
-                'lstm_layers': 3,
+                'lstm_layers': 0,
                 'dropout': 0.33,
                 'order_dim': args.order_dim,
                 'is_eng': is_eng,
@@ -304,15 +306,15 @@ def train(args):
         reader = BracketParseCorpusReader(data_path, [])
     elif args.tagger == PARTIALORDER:
         reader = DependencyCorpusReader(data_path, [])
-    logging.info("Initializing Tag System")
+    logger.info("Initializing Tag System")
     tag_system = initialize_tag_system(
         reader, args.tagger, args.lang,
         tag_vocab_path=args.tag_vocab_path, add_remove_top=True
     )
-    logging.info("Preparing Data")
+    logger.info("Preparing Data")
     train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
         reader, tag_system, args.tagger, args.model_path, args.batch_size, args.lang)
-    logging.info("Initializing The Model")
+    logger.info("Initializing The Model")
     is_eng = True if args.lang == ENG else False
     model = initialize_model(
         args, args.model, args.tagger, tag_system, args.model_path, is_eng
@@ -326,6 +328,7 @@ def train(args):
     )
     optimizer.zero_grad()
     run_name = get_model_name(args)
+    exp_name = time.strftime("%Y-%m-%d-%H-%M-%S")
 
     writer = None
     if args.use_tensorboard:
@@ -335,7 +338,7 @@ def train(args):
         num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
 
 
-    logging.info("Starting The Training Loop")
+    logger.info("Starting The Training Loop")
     model.train()
     n_iter = 0
 
@@ -347,7 +350,7 @@ def train(args):
     tol = 99999
 
     for epo in tq(range(args.epochs)):
-        logging.info(f"*******************EPOCH {epo}*******************")
+        logger.info(f"*******************EPOCH {epo}*******************")
         t = 1
         model.train()
 
@@ -398,89 +401,54 @@ def train(args):
                     "", args.max_depth, args.keep_per_depth, False)
 
             eval_loss = 0.5
-            if args.tagger == HEXATAGGER or args.tagger == PARTIALORDER:
-                writer.add_scalar('LAS_Fscore/dev',
-                                  dev_metrics_las.fscore, n_iter)
-                writer.add_scalar('LAS_Precision/dev',
-                                  dev_metrics_las.precision, n_iter)
-                writer.add_scalar('LAS_Recall/dev',
-                                  dev_metrics_las.recall, n_iter)
-                writer.add_scalar('loss/dev', eval_loss, n_iter)
 
-                logging.info("current LAS {}".format(dev_metrics_las))
-                logging.info("current UAS {}".format(dev_metrics_uas))
-                logging.info("last LAS fscore {}".format(last_fscore))
-                logging.info("best LAS fscore {}".format(best_fscore))
-                # setting main metric for model selection
-                dev_metrics = dev_metrics_las
-            else:
-                writer.add_scalar('Fscore/dev', dev_metrics.fscore, n_iter)
-                writer.add_scalar('Precision/dev', dev_metrics.precision, n_iter)
-                writer.add_scalar('Recall/dev', dev_metrics.recall, n_iter)
-                writer.add_scalar('loss/dev', eval_loss, n_iter)
+            writer.add_scalar('LAS_Fscore/dev',
+                                dev_metrics_las.fscore, n_iter)
+            writer.add_scalar('LAS_Precision/dev',
+                                dev_metrics_las.precision, n_iter)
+            writer.add_scalar('LAS_Recall/dev',
+                                dev_metrics_las.recall, n_iter)
+            writer.add_scalar('loss/dev', eval_loss, n_iter)
 
-                logging.info("current fscore {}".format(dev_metrics.fscore))
-                logging.info("last fscore {}".format(last_fscore))
-                logging.info("best fscore {}".format(best_fscore))
-
-                # if dev_metrics.fscore > last_fscore or dev_loss < last...
-                if dev_metrics.fscore > last_fscore:
-                    tol = 5
-                    if dev_metrics.fscore > best_fscore:  # if dev_metrics.fscore > best_fscore:
-                        logging.info("save the best model")
-                        best_fscore = dev_metrics.fscore
-                        _save_best_model(model, args.output_path, run_name)
-                elif dev_metrics.fscore > 0:  # dev_metrics.fscore
-                    tol -= 1
-
-                if tol < 0:
-                    _finish_training(model, tag_system, eval_dataloader,
-                                     eval_dataset, eval_loss, run_name, writer, args)
-                    return
-                if dev_metrics.fscore > 0:  # not propagating the nan
-                    last_eval_loss = eval_loss
-                    last_fscore = dev_metrics.fscore
+            logger.info("current LAS {}".format(dev_metrics_las))
+            logger.info("current UAS {}".format(dev_metrics_uas))
+            logger.info("last LAS fscore {}".format(last_fscore))
+            logger.info("best LAS fscore {}".format(best_fscore))
+            # setting main metric for model selection
+            dev_metrics = dev_metrics_las
 
             # if dev_metrics.fscore > last_fscore or dev_loss < last...
             if dev_metrics.fscore > best_fscore:
                 tol = 99999
-                logging.info("tol refill")
-                logging.info("save the best model")
+                logger.info("tol refill")
+                logger.info("save the best model")
                 best_eval_loss = eval_loss
                 best_fscore = dev_metrics.fscore
-                _save_best_model(model, args.output_path, run_name)
+                summary = {
+                    'LAS': dev_metrics_las.__dict__,
+                    'UAS': dev_metrics_uas.__dict__,
+                    'loss': eval_loss
+                }
+                _save_best_model(model, args.output_path, run_name, exp_name, summary)
             elif eval_loss > 0:
                 tol -= 1
 
-            if tol < 0:
-                _finish_training(model, tag_system, eval_dataloader,
-                                 eval_dataset, eval_loss, run_name, writer, args)
-                return
             if eval_loss > 0:  # not propagating the nan
                 last_eval_loss = eval_loss
             # end of epoch
             pass
-    
-    if args.tagger == HEXATAGGER:
-        _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
-                        run_name, writer, args)
 
 
-def _save_best_model(model, output_path, run_name):
-    logging.info("Saving The Newly Found Best Model")
-    torch.save(model.state_dict(), output_path + run_name)
+def _save_best_model(model, output_path, run_name, exp_name, summary):
+    logger.info("Saving the best model weights")
+    if not os.path.exists(f"{output_path}{exp_name}"):
+        os.makedirs(f"{output_path}{exp_name}")
+    with open(f"{output_path}{exp_name}/{run_name}.summary.json", 'a') as f:
+        json.dump(summary, f)
 
+    torch.save(model.state_dict(), f"{output_path}{exp_name}/{run_name}")
+        
 
-def _finish_training(model, tag_system, eval_dataloader, eval_dataset, eval_loss,
-                     run_name, writer, args):
-    num_leaf_labels, num_tags = calc_num_tags_per_task(args.tagger, tag_system)
-    predictions, eval_labels = predict(model, eval_dataloader, len(eval_dataset),
-                                       num_tags, args.batch_size,
-                                       device)
-    even_acc, odd_acc = calc_tag_accuracy(predictions, eval_labels, num_leaf_labels, writer,
-                                          args.use_tensorboard)
-    register_run_metrics(writer, run_name, args.lr,
-                         args.epochs, eval_loss, even_acc, odd_acc)
 
 
 def get_model_name(args):
@@ -490,6 +458,7 @@ def get_model_name(args):
         run_name = "-".join([args.lang, args.tagger, str(args.order_dim), args.model, str(args.lr), str(args.epochs)])
 
     return run_name
+
 
 def decode_model_name(model_name):
     name_chunks = model_name.split("-")
@@ -523,13 +492,13 @@ def evaluate(args):
 
     reader = BracketParseCorpusReader(data_path,[])
     writer = SummaryWriter(comment=args.model_name)
-    logging.info("Initializing Tag System")
+    logger.info("Initializing Tag System")
     tag_system = initialize_tag_system(
         reader, tagging_schema, args.lang,
         tag_vocab_path=args.tag_vocab_path,
         add_remove_top=True
     )
-    logging.info("Preparing Data")
+    logger.info("Preparing Data")
     eval_dataset, eval_dataloader = prepare_test_data(
         reader, tag_system, tagging_schema,
         args.bert_model_path, args.batch_size,
