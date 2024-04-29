@@ -4,5 +4,11 @@
 !.gitignore
 !*.py
 !*.md
-# except ending with .clean
+
+# except ending with .clean, .json, .conll
 !*.clean
+!*.json
+!*.conll
+# except ptb folder
+!ptb/
+!ctb/
