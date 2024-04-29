@@ -134,19 +134,25 @@ class ModelForPartialOrder(nn.Module):
             )
 
         self.endofword_embedding = nn.Embedding(2, self.pos_emb_dim)
-        self.lstm = nn.LSTM(
-            2*config.hidden_size + self.pos_emb_dim*(1+self.use_pos),
-            config.hidden_size, 
-            config.task_specific_params['lstm_layers'],
-            dropout=self.dropout_rate,
-            batch_first=True, bidirectional=True
-        )
+        if config.task_specific_params['lstm_layers'] > 0:
+            self.lstm = nn.LSTM(
+                2*config.hidden_size + self.pos_emb_dim*(1+self.use_pos),
+                config.hidden_size, 
+                config.task_specific_params['lstm_layers'],
+                dropout=self.dropout_rate,
+                batch_first=True, bidirectional=True
+            )
+            clf_dim = 2*config.hidden_size
+        else:
+            self.lstm = lambda x: (x, None)
+            clf_dim = 2*config.hidden_size + self.pos_emb_dim*(1+self.use_pos)
+
 
         self.realizer = nn.Sequential(
-            nn.Linear(2*config.hidden_size, 2*config.task_specific_params['order_dim'])
+            nn.Linear(clf_dim, 2*config.task_specific_params['order_dim'])
         )
         self.rel_clf = nn.Sequential(
-            nn.Linear(2*config.hidden_size, self.num_rel_tags)
+            nn.Linear(clf_dim, self.num_rel_tags)
         )
 
 
