@@ -4,3 +4,5 @@
 !.gitignore
 !*.py
 !*.md
+# except ending with .clean
+!*.clean
