@@ -11,7 +11,9 @@ from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm as tq
-from transformers import AdamW
+# use 8-bit adamw
+from bitsandbytes.optim import AdamW
+# from transformers import AdamW
 
 from const import *
 from learning.dataset import TaggingDataset

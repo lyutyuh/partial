@@ -130,9 +130,20 @@ class TaggingDataset(torch.utils.data.Dataset):
         }
 
     def collate(self, batch):
+        # for GPT-2, self.pad_token_id is None
+        pad_token_id = self.pad_token_id if self.pad_token_id is not None else -100
         input_ids = pad_sequence(
             [item['input_ids'] for item in batch],
-            batch_first=True, padding_value=self.pad_token_id)
+            batch_first=True, padding_value=pad_token_id)
+        input_ids = input_ids.to(self.device)
+        attention_mask = (input_ids != pad_token_id).float()
+        # for GPT-2, change -100 back into 0
+        input_ids = torch.where(
+            input_ids == -100,
+            0,
+            input_ids
+        )
+
         pos_ids = pad_sequence(
             [item['pos_ids'] for item in batch],
             batch_first=True, padding_value=0) # 0 for UNK POS
@@ -140,8 +151,6 @@ class TaggingDataset(torch.utils.data.Dataset):
             [item['labels'] for item in batch],
             batch_first=True, padding_value=0)
 
-        input_ids = input_ids.to(self.device)
-        attention_mask = (input_ids != self.pad_token_id).float()
         labels = labels.to(self.device)
         return {
             'input_ids': input_ids,

@@ -58,6 +58,7 @@ python run.py evaluate --lang [LANGUAGE] --model-name [MODEL] --model-path [MODE
 | BERT-large   |    94.22     | 95.60        | bs = 64
 | XLNet        |    95.89     | 97.01        | bs = 32 # with POS and ignore punct
 | RoBERTa      |         |         | bs = 32 not as good as XLNet
+| GPT2-large   |    72.07     | 68.11        | # uni-direction baseline
 
 
 ### Commands to train the best models
