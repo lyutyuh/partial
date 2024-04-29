@@ -1,6 +1,7 @@
 # project specific
 checkpoints/
 runs/
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

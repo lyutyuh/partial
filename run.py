@@ -63,6 +63,7 @@ train.add_argument('--tag-vocab-path', type=str, default="data/vocab/")
 train.add_argument('--model', choices=BERT, required=True, help="Model architecture")
 
 train.add_argument('--order-dim', type=int, default=2, help="Model architecture")
+train.add_argument('--n-lstm-layers', type=int, default=0, help="Model architecture")
 
 
 train.add_argument('--model-path', type=str, default='bertlarge',
@@ -214,7 +215,7 @@ def generate_config(args, model_type, tagging_schema, tag_system, model_path, is
                 'num_odd_tags': tag_system.decode_moderator.internal_tag_vocab_size,
                 'pos_emb_dim': 256,
                 'num_pos_tags': 50,
-                'lstm_layers': 3,
+                'lstm_layers': args.n_lstm_layers,
                 'dropout': 0.33,
                 'is_eng': is_eng,
                 'use_pos': True
@@ -227,7 +228,7 @@ def generate_config(args, model_type, tagging_schema, tag_system, model_path, is
                 'model_path': model_path,
                 'pos_emb_dim': 256,
                 'num_pos_tags': 50,
-                'lstm_layers': 0,
+                'lstm_layers': args.n_lstm_layers,
                 'dropout': 0.33,
                 'order_dim': args.order_dim,
                 'is_eng': is_eng,
@@ -427,7 +428,8 @@ def train(args):
                 summary = {
                     'LAS': dev_metrics_las.__dict__,
                     'UAS': dev_metrics_uas.__dict__,
-                    'loss': eval_loss
+                    'loss': eval_loss,
+                    'args': args.__dict__
                 }
                 _save_best_model(model, args.output_path, run_name, exp_name, summary)
             elif eval_loss > 0:
