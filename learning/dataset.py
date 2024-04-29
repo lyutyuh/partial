@@ -46,28 +46,39 @@ def ptb_unescape(sent):
 
 
 class TaggingDataset(torch.utils.data.Dataset):
-    def __init__(self, split, tokenizer, tag_system, reader, device, is_tetratags=False, pad_to_len=None,
-                 max_train_len=None):
+    def __init__(self, split, tokenizer, tag_system, reader, device, is_tetratags=False, language="english", pad_to_len=None,
+                 max_train_len=1024):
         self.reader = reader
-        self.trees = self.reader.parsed_sents(split)
         self.tokenizer = tokenizer
+        self.language = language
         self.tag_system = tag_system
         self.pad_token_id = self.tokenizer.pad_token_id
         self.pad_to_len = pad_to_len
         self.device = device
         self.is_tetratags = is_tetratags
 
-        if split == 'train' and max_train_len is not None:
-            # To speed up training, we only train on short sentences.
-            self.trees = [
-                tree for tree in self.trees if len(tree.leaves()) <= max_train_len]
-        if not os.path.exists("./pos.json") and "train" in split:
+        if not os.path.exists(f"./data/hexatagging/pos.{language.lower()}.json") and "train" in split:
             self.pos_dict = self.get_pos_dict()
-            with open("./pos.json", 'w') as fp:
+            with open(f"./data/hexatagging/pos.{language.lower()}.json", 'w') as fp:
                 json.dump(self.pos_dict, fp)
         else:
-            with open("./pos.json", 'r') as fp:
+            with open(f"./data/hexatagging/pos.{language.lower()}.json", 'r') as fp:
                 self.pos_dict = json.load(fp)
+
+        if self.is_tetratags:
+            self.trees = self.reader.parsed_sents(split)
+            if "train" in split and max_train_len is not None:
+                # To speed up training, we only train on short sentences.
+                print(len(self.trees), "trees before filtering")
+                self.trees = [
+                    tree for tree in self.trees if (len(tree.leaves()) <= max_train_len and len(tree.leaves()) >= 2)]
+                print(len(self.trees), "trees after filtering")
+            else:
+                # speed up!
+                self.trees = [
+                    tree for tree in self.trees if len(tree.leaves()) <= max_train_len]
+        else:
+            self.trees = self.reader.parsed_sents(split)
 
     def get_pos_dict(self):
         pos_dict = {}
@@ -87,29 +98,38 @@ class TaggingDataset(torch.utils.data.Dataset):
         if 'albert' in str(type(self.tokenizer)):
             # albert is case insensitive!
             words = [w.lower() for w in words]
+
         encoded = self.tokenizer.encode_plus(' '.join(words))
-        input_ids = torch.tensor(encoded['input_ids'], dtype=torch.long)
-        pos_ids = torch.zeros_like(input_ids).to(self.device)
-
-
         word_end_positions = [
             encoded.char_to_token(i)
             for i in np.cumsum([len(word) + 1 for word in words]) - 2]
+        word_start_positions = [
+            encoded.char_to_token(i)
+            for i in np.cumsum([0]+[len(word) + 1 for word in words])[:-1]]
+
+        input_ids = torch.tensor(encoded['input_ids'], dtype=torch.long)
+        pair_ids = torch.zeros_like(input_ids)
+        end_of_word = torch.zeros_like(input_ids)
+        pos_ids = torch.zeros_like(input_ids)
 
         tag_ids = self.tag_system.tree_to_ids_pipeline(tree)
 
         # Pack both leaf and internal tag ids into a single "label" field.
         # (The huggingface API isn't flexible enough to use multiple label fields)
         tag_ids = [tag_id + 1 for tag_id in tag_ids] + [0]
-        tag_ids = torch.tensor(tag_ids, dtype=torch.long).to(self.device)
-        labels = torch.zeros_like(input_ids).to(self.device)
+        tag_ids = torch.as_tensor(tag_ids, dtype=torch.long)
+        labels = torch.zeros_like(input_ids)
 
         odd_labels = tag_ids[1::2]
         if self.is_tetratags:
             even_labels = tag_ids[::2] - self.tag_system.decode_moderator.internal_tag_vocab_size
             labels[word_end_positions] = (
                     odd_labels * (self.tag_system.decode_moderator.leaf_tag_vocab_size + 1) + even_labels)
-            pos_ids[word_end_positions] = torch.tensor(pos_tags, dtype=torch.long).to(self.device)
+            pos_ids[word_end_positions] = torch.as_tensor(pos_tags, dtype=torch.long)
+            pair_ids[word_end_positions] = torch.as_tensor(word_start_positions)
+
+            end_of_word[word_end_positions] = 1
+            end_of_word[word_end_positions[-1]] = 2 # last word
         else:
             even_labels = tag_ids[::2]
             labels[word_end_positions] = (
@@ -117,8 +137,7 @@ class TaggingDataset(torch.utils.data.Dataset):
 
         if self.pad_to_len is not None:
             pad_amount = self.pad_to_len - input_ids.shape[0]
-            assert pad_amount >= 0
-            if pad_amount != 0:
+            if pad_amount >= 0:
                 input_ids = F.pad(input_ids, [0, pad_amount], value=self.pad_token_id)
                 pos_ids = F.pad(pos_ids, [0, pad_amount], value=0)
                 labels = F.pad(labels, [0, pad_amount], value=0)
@@ -126,6 +145,8 @@ class TaggingDataset(torch.utils.data.Dataset):
         return {
             'input_ids': input_ids,
             'pos_ids': pos_ids,
+            'pair_ids': pair_ids,
+            'end_of_word': end_of_word,
             'labels': labels
         }
 
@@ -135,7 +156,7 @@ class TaggingDataset(torch.utils.data.Dataset):
         input_ids = pad_sequence(
             [item['input_ids'] for item in batch],
             batch_first=True, padding_value=pad_token_id)
-        input_ids = input_ids.to(self.device)
+
         attention_mask = (input_ids != pad_token_id).float()
         # for GPT-2, change -100 back into 0
         input_ids = torch.where(
@@ -144,17 +165,173 @@ class TaggingDataset(torch.utils.data.Dataset):
             input_ids
         )
 
+        pair_ids = pad_sequence(
+            [item['pair_ids'] for item in batch],
+            batch_first=True, padding_value=pad_token_id)
+        end_of_word = pad_sequence(
+            [item['end_of_word'] for item in batch],
+            batch_first=True, padding_value=0)
         pos_ids = pad_sequence(
             [item['pos_ids'] for item in batch],
-            batch_first=True, padding_value=0) # 0 for UNK POS
+            batch_first=True, padding_value=0)
+
         labels = pad_sequence(
             [item['labels'] for item in batch],
             batch_first=True, padding_value=0)
 
-        labels = labels.to(self.device)
         return {
             'input_ids': input_ids,
             'pos_ids': pos_ids,
+            'pair_ids': pair_ids,
+            'end_of_word': end_of_word,
             'attention_mask': attention_mask,
             'labels': labels,
+        }
+
+
+class DependencyDataset(torch.utils.data.Dataset):
+
+    def __init__(self, split, tokenizer, tag_system, reader, device, language="english", pad_to_len=None,
+                 max_train_len=1024):
+        self.reader = reader
+        self.tokenizer = tokenizer
+        self.language = language
+        self.tag_system = tag_system
+        self.pad_token_id = self.tokenizer.pad_token_id
+        self.pad_to_len = pad_to_len
+        self.device = device
+
+        self.trees = self.reader.parsed_sents(split)
+
+        if not os.path.exists(f"./data/partialordering/pos.{language.lower()}.json") and "train" in split:
+            self.pos_dict = self.get_pos_dict()
+            with open(f"./data/partialordering/pos.{language.lower()}.json", 'w') as fp:
+                json.dump(self.pos_dict, fp)
+        else:
+            with open(f"./data/partialordering/pos.{language.lower()}.json", 'r') as fp:
+                self.pos_dict = json.load(fp)
+        
+        if not os.path.exists(f"./data/partialordering/rel.{language.lower()}.json") and "train" in split:
+            self.rel_dict = self.get_rel_dict()
+            with open(f"./data/partialordering/rel.{language.lower()}.json", 'w') as fp:
+                json.dump(self.rel_dict, fp)
+        else:
+            with open(f"./data/partialordering/rel.{language.lower()}.json", 'r') as fp:
+                self.rel_dict = json.load(fp)
+
+
+    def get_pos_dict(self):
+        pos_dict = {}
+        for t in self.trees:
+            for x in t.nodes.values():
+                if x["tag"] is not None:
+                    pos_dict[x["tag"]] = pos_dict.get(x["tag"], 1+len(pos_dict))
+        return pos_dict
+
+    def get_rel_dict(self):
+        rel_dict = {}
+        for t in self.trees:
+            for x in t.nodes.values():
+                if x["rel"] is not None:
+                    rel_dict[x["rel"]] = rel_dict.get(x["rel"], len(rel_dict))
+        return rel_dict
+
+    def __len__(self):
+        return len(self.trees)
+
+    def __getitem__(self, index):
+        tree = self.trees[index]
+        words = ptb_unescape([x["word"] for i,x in sorted(tree.nodes.items()) if x["word"] is not None])
+
+        if 'albert' in str(type(self.tokenizer)):
+            # albert is case insensitive!
+            words = [w.lower() for w in words]
+
+        encoded = self.tokenizer.encode_plus(' '.join(words))
+        word_end_positions = [
+            encoded.char_to_token(i)
+            for i in np.cumsum([len(word) + 1 for word in words]) - 2]
+        word_start_positions = [
+            encoded.char_to_token(i)
+            for i in np.cumsum([0]+[len(word) + 1 for word in words])[:-1]]
+
+        input_ids = torch.as_tensor(encoded['input_ids'], dtype=torch.long)
+        pair_ids = torch.zeros_like(input_ids)
+        end_of_word = torch.zeros_like(input_ids)
+        pos_ids = torch.zeros_like(input_ids)
+
+        head_labels = torch.zeros_like(input_ids) - 1
+        rel_labels = torch.zeros_like(input_ids) - 1
+
+        heads = [x["head"] for i,x in sorted(tree.nodes.items()) if x["word"] is not None]
+        rel_tags = [self.rel_dict.get(x["rel"], 0) for i,x in sorted(tree.nodes.items()) if x["word"] is not None]
+        pos_tags = [self.pos_dict.get(x["tag"], 0) for i,x in sorted(tree.nodes.items()) if x["word"] is not None]
+
+        pos_ids[word_end_positions] = torch.as_tensor(pos_tags, dtype=torch.long)
+        pair_ids[word_end_positions] = torch.as_tensor(word_start_positions)
+
+        # head_labels[word_end_positions] = torch.as_tensor(heads)
+        # rel_labels[word_end_positions] = torch.as_tensor(rel_tags)
+        head_labels = torch.as_tensor(heads)
+        rel_labels = torch.as_tensor(rel_tags)
+
+        end_of_word[word_end_positions] = 1
+        end_of_word[word_end_positions[-1]] = 2 # last word
+
+
+        if self.pad_to_len is not None:
+            pad_amount = self.pad_to_len - input_ids.shape[0]
+            if pad_amount >= 0:
+                input_ids = F.pad(input_ids, [0, pad_amount], value=self.pad_token_id)
+                pos_ids = F.pad(pos_ids, [0, pad_amount], value=0)
+                head_labels = F.pad(labels, [0, pad_amount], value=-1)
+                rel_labels = F.pad(labels, [0, pad_amount], value=-1)
+
+        return {
+            'input_ids': input_ids,
+            'pos_ids': pos_ids,
+            'pair_ids': pair_ids,
+            'end_of_word': end_of_word,
+            'head_labels': head_labels,
+            'rel_labels': rel_labels,
+        }
+
+    def collate(self, batch):
+        # for GPT-2, self.pad_token_id is None
+        pad_token_id = self.pad_token_id if self.pad_token_id is not None else -100
+        input_ids = pad_sequence(
+            [item['input_ids'] for item in batch],
+            batch_first=True, padding_value=pad_token_id)
+
+        attention_mask = (input_ids != pad_token_id).float()
+        # for GPT-2, change -100 back into 0
+        input_ids = torch.where(
+            input_ids == -100, 0, input_ids
+        )
+
+        pair_ids = pad_sequence(
+            [item['pair_ids'] for item in batch],
+            batch_first=True, padding_value=pad_token_id)
+        end_of_word = pad_sequence(
+            [item['end_of_word'] for item in batch],
+            batch_first=True, padding_value=0)
+        pos_ids = pad_sequence(
+            [item['pos_ids'] for item in batch],
+            batch_first=True, padding_value=0)
+
+        head_labels = pad_sequence(
+            [item['head_labels'] for item in batch],
+            batch_first=True, padding_value=-1)
+        rel_labels = pad_sequence(
+            [item['rel_labels'] for item in batch],
+            batch_first=True, padding_value=-1)
+
+        return {
+            'input_ids': input_ids,
+            'pos_ids': pos_ids,
+            'pair_ids': pair_ids,
+            'end_of_word': end_of_word,
+            'attention_mask': attention_mask,
+            'head_labels': head_labels,
+            'rel_labels': rel_labels,
         }

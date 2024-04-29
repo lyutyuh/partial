@@ -67,6 +67,7 @@ class BeamSearch:
         )
         return all_new_scores, all_new_stack_depths
 
+
     def advance(self, label_logits, is_last=False):
         label_log_probs = label_logits
 
@@ -90,18 +91,16 @@ class BeamSearch:
             )
 
         masked_scores = all_new_scores[None, :, :] + np.where(
-            all_new_stack_depths[None, :, :]
-            == self.valid_depths[:, None, None],
-            0.0,
-            -np.inf,
+            all_new_stack_depths[None, :, :] == self.valid_depths[:, None, None],
+            0.0, -np.inf,
         )
         masked_scores = masked_scores.reshape(self.valid_depths.shape[0], -1)
         idxs = np.argsort(-masked_scores)[:, : self.keep_per_depth].flatten()
         backptrs, labels = np.unravel_index(idxs, all_new_scores.shape)
 
         transition_valid = all_new_stack_depths[
-                               backptrs, labels
-                           ] == self.valid_depths.repeat(self.keep_per_depth)
+            backptrs, labels
+        ] == self.valid_depths.repeat(self.keep_per_depth)
 
         backptrs = backptrs[transition_valid]
         labels = labels[transition_valid]

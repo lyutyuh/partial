@@ -13,7 +13,7 @@ class CRF(nn.Module):
     """
 
     def __init__(
-            self, nb_labels, device=None, batch_first=True
+        self, nb_labels, device=None, batch_first=True
     ):
         super(CRF, self).__init__()
 
