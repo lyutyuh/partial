@@ -445,6 +445,7 @@ def _save_best_model(model, output_path, run_name, exp_name, summary):
         os.makedirs(f"{output_path}{exp_name}")
     with open(f"{output_path}{exp_name}/{run_name}.summary.json", 'a') as f:
         json.dump(summary, f)
+        f.write("\n")
 
     torch.save(model.state_dict(), f"{output_path}{exp_name}/{run_name}")
         
