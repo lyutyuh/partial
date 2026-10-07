@@ -153,3 +153,28 @@ def test_ties_between_head_and_dependent_keys():
     _, scores = decode(f, g, lens)
     m = _valid(lens, 15)
     torch.testing.assert_close(scores[m], s.amax(-1)[m])  # heads may differ on ties; the max score may not
+
+
+def test_arc_loss_tie_gradient_matches_quadratic():
+    """Exact F-tie at the gold arc: p(gold) = 1, so the loss and all gradients are 0 (review finding 1)."""
+    f = torch.tensor([[[1.0, 1.0]]], device=DEVICE, requires_grad=True)
+    g = torch.tensor([[[0.0, 0.0]]], device=DEVICE, requires_grad=True)
+    loss = arc_loss(f, g, torch.tensor([[1]], device=DEVICE), torch.tensor([1], device=DEVICE), include_root=False)
+    loss.backward()
+    assert abs(loss.item()) < 1e-6
+    assert f.grad.abs().max() < 1e-6 and g.grad.abs().max() < 1e-6
+
+
+def test_negative_zero_key_keeps_heads_first():
+    """Dependent key -0.0 vs head key +0.0 must still use branch 1 (review finding 2)."""
+    f = torch.tensor([[[-0.0, 0.0]]], device=DEVICE, requires_grad=True)
+    g = torch.tensor([[[0.0, 0.0]]], device=DEVICE, requires_grad=True)
+    log_partition(f, g, torch.tensor([1], device=DEVICE), include_root=False).sum().backward()
+    torch.testing.assert_close(f.grad, torch.tensor([[[-1.0, 0.0]]], device=DEVICE))
+    torch.testing.assert_close(g.grad, torch.tensor([[[1.0, 0.0]]], device=DEVICE))
+
+
+def test_invalid_lengths_are_rejected():
+    f, g, _ = _inputs(0, 2, 5)
+    with pytest.raises(ValueError):
+        log_partition(f, g, torch.tensor([5, 6], device=DEVICE))
