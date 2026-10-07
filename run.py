@@ -64,6 +64,9 @@ train.add_argument('--model', choices=BERT, required=True, help="Model architect
 
 train.add_argument('--order-dim', type=int, default=2, help="Model architecture")
 train.add_argument('--n-lstm-layers', type=int, default=0, help="Model architecture")
+train.add_argument('--linear-time', action='store_true',
+                   help="Train/decode with the Triton linear-time kernels (order-dim 2, hard max); no N x N matrix")
+train.add_argument('--seed', type=int, default=1)
 
 
 train.add_argument('--model-path', type=str, default='bertlarge',
@@ -164,7 +167,9 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
     elif tagging_schema == PARTIALORDER:
         prefix = "%s.gold.conllu"
         train_dataset = DependencyDataset(prefix % ('train',), tokenizer, tag_system, reader, device, language=lang)
-        eval_dataset = DependencyDataset(prefix % ('test',), tokenizer, tag_system, reader, device, language=lang)
+        eval_dataset = DependencyDataset(prefix % ('dev',), tokenizer, tag_system, reader, device, language=lang)
+        test_dataset = DependencyDataset(prefix % ('test',), tokenizer, tag_system, reader, device, language=lang)
+        test_dataloader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=test_dataset.collate)
 
     train_dataloader = DataLoader(
         train_dataset, shuffle=True, batch_size=batch_size, collate_fn=train_dataset.collate, pin_memory=True
@@ -172,7 +177,9 @@ def prepare_training_data(reader, tag_system, tagging_schema, model_name, batch_
     eval_dataloader = DataLoader(
         eval_dataset, batch_size=batch_size, collate_fn=eval_dataset.collate, pin_memory=True
     )
-    return train_dataset, eval_dataset, train_dataloader, eval_dataloader
+    if tagging_schema == PARTIALORDER:
+        return train_dataset, eval_dataset, train_dataloader, eval_dataloader, test_dataset, test_dataloader
+    return train_dataset, eval_dataset, train_dataloader, eval_dataloader, None, None
 
 
 def prepare_test_data(reader, tag_system, tagging_schema, model_name, batch_size, lang):
@@ -231,6 +238,7 @@ def generate_config(args, model_type, tagging_schema, tag_system, model_path, is
                 'lstm_layers': args.n_lstm_layers,
                 'dropout': 0.33,
                 'order_dim': args.order_dim,
+                'linear_time': getattr(args, 'linear_time', False),
                 'is_eng': is_eng,
                 'use_pos': True
             }
@@ -313,8 +321,11 @@ def train(args):
         tag_vocab_path=args.tag_vocab_path, add_remove_top=True
     )
     logger.info("Preparing Data")
-    train_dataset, eval_dataset, train_dataloader, eval_dataloader = prepare_training_data(
-        reader, tag_system, args.tagger, args.model_path, args.batch_size, args.lang)
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    train_dataset, eval_dataset, train_dataloader, eval_dataloader, test_dataset, test_dataloader = \
+        prepare_training_data(reader, tag_system, args.tagger, args.model_path, args.batch_size, args.lang)
     logger.info("Initializing The Model")
     is_eng = True if args.lang == ENG else False
     model = initialize_model(
@@ -354,6 +365,7 @@ def train(args):
         logger.info(f"*******************EPOCH {epo}*******************")
         t = 1
         model.train()
+        epoch_start = time.time()
 
         with tq(train_dataloader, disable=False) as progbar:
             for batch in progbar:
@@ -378,6 +390,9 @@ def train(args):
                 n_iter += 1
                 t += 1
 
+        torch.cuda.synchronize()
+        logger.info("epoch {} train time {:.1f}s ({:.1f} ms/step)".format(
+            epo, time.time() - epoch_start, 1000 * (time.time() - epoch_start) / max(t - 1, 1)))
         if True:  # evaluation at the end of epoch
 
             if args.tagger == HEXATAGGER:
@@ -400,6 +415,13 @@ def train(args):
                 dev_metrics_las, dev_metrics_uas = partial_order_dependency_eval(
                     predictions, eval_labels, eval_dataset, None, 
                     "", args.max_depth, args.keep_per_depth, False)
+                # model selection is on dev; test is recorded alongside so the best-dev epoch's test score is kept
+                test_predictions, test_labels = predict_partial_order(
+                    model, test_dataloader, len(test_dataset), args.batch_size, device)
+                test_metrics_las, test_metrics_uas = partial_order_dependency_eval(
+                    test_predictions, test_labels, test_dataset, None,
+                    "", args.max_depth, args.keep_per_depth, False)
+                logger.info("epoch {} test LAS {} UAS {}".format(epo, test_metrics_las, test_metrics_uas))
 
             eval_loss = 0.5
 
@@ -426,8 +448,11 @@ def train(args):
                 best_eval_loss = eval_loss
                 best_fscore = dev_metrics.fscore
                 summary = {
+                    'epoch': epo,
                     'LAS': dev_metrics_las.__dict__,
                     'UAS': dev_metrics_uas.__dict__,
+                    'test_LAS': test_metrics_las.__dict__ if args.tagger == PARTIALORDER else None,
+                    'test_UAS': test_metrics_uas.__dict__ if args.tagger == PARTIALORDER else None,
                     'loss': eval_loss,
                     'args': args.__dict__
                 }
@@ -459,6 +484,8 @@ def get_model_name(args):
         run_name = "-".join([args.lang, args.tagger, args.model, str(args.lr), str(args.epochs)])
     elif args.tagger == PARTIALORDER:
         run_name = "-".join([args.lang, args.tagger, str(args.order_dim), args.model, str(args.lr), str(args.epochs)])
+        if getattr(args, 'linear_time', False):
+            run_name += "-linear"
 
     return run_name
 

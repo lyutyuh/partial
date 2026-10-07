@@ -9,6 +9,7 @@ from typing import Optional, Tuple, Any, Dict, Iterable, Union
 import math
 from learning.crf import CRF
 from learning.util import TakeLSTMOutput, onehot_with_ignore_label
+from learning.linear_order import arc_loss, decode
 
 MIN = -1e9
 
@@ -126,6 +127,10 @@ class ModelForPartialOrder(nn.Module):
 
         self.pos_emb_dim = config.task_specific_params['pos_emb_dim']
         self.dropout_rate = config.task_specific_params['dropout']
+        # Linear-time path (Triton, K = 2, hard max of Eq. 2): no (N, N) score matrix in training or decoding.
+        self.linear_time = config.task_specific_params.get('linear_time', False)
+        if self.linear_time and config.task_specific_params['order_dim'] != 2:
+            raise ValueError("linear_time requires order_dim == 2")
 
         self.bert = AutoModel.from_pretrained(self.model_path, config=config)
         if self.use_pos:
@@ -201,6 +206,13 @@ class ModelForPartialOrder(nn.Module):
 
         # shape: (batch_size, seq_len, order_dim)
         tosets, tosets_prime = self.realizer(token_repr).chunk(2, dim=-1)
+        if self.linear_time:
+            s_rel = self.rel_clf(token_repr)
+            if head_labels is not None and self.training:
+                rel_loss = F.cross_entropy(torch.movedim(s_rel, -1, 1), rel_labels, ignore_index=-1)
+                return arc_loss(tosets, tosets_prime, head_labels, real_word_lens) + rel_loss, (None, s_rel)
+            # heads: (B, L) int, 0 = ROOT, j + 1 = word j -- the column convention of s_arc below
+            return None, (decode(tosets, tosets_prime, real_word_lens)[0], s_rel)
         # shape: (batch_size, seq_len, seq_len)
         pairwise_F = -(logsumexp(tosets.unsqueeze(2) - tosets_prime.unsqueeze(1), dim=-1))
         # [batch_size, seq_len, seq_len]

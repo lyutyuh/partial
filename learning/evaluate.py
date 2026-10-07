@@ -66,6 +66,11 @@ def predict_partial_order(
             outputs = model(**batch)
 
         arc_logits, rel_logits = outputs[1]
+        if not arc_logits.is_floating_point():
+            # linear-time model returns decoded heads; one-hot them so the argmax-based evaluation is unchanged
+            heads = arc_logits.long()
+            arc_logits = torch.zeros(heads.shape + (heads.shape[1] + 1,), device=heads.device)
+            arc_logits.scatter_(-1, heads.unsqueeze(-1), 1.0)
         arc_logits, rel_logits = arc_logits.float().cpu().numpy(), rel_logits.float().cpu().numpy()
         max_len = max(max_len, arc_logits.shape[1])
 

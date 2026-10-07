@@ -16,11 +16,12 @@ conda activate partial
 No conda there; use the pytorch uenv plus a venv (`requirements-alps.txt` lists the extras):
 ```bash
 bash setup_alps.sh                     # venv, data/ptb/*.gold.conllu symlinks, encoders -> /capstor/store cache
-sbatch run_ptb_sbatch.sh               # 4 single-GPU arms on one node: {xlnet-large-cased, bert-base-cased} x K in {2, 4}
-ARMS="xlnet-large-cased:2" EPOCHS=1 sbatch run_ptb_sbatch.sh   # custom arms
+sbatch run_ptb_sbatch.sh               # 4 single-GPU arms: xlnet-large-cased, K = 2, {Triton linear, quadratic} x seeds {1, 2}
+ARMS="xlnet-large-cased:2:linear:1" EPOCHS=1 sbatch run_ptb_sbatch.sh   # arm = encoder:K:linear|quadratic:seed
 ```
 Notes: the uenv's transformers 4.57 / torch 2.9.1 replace the pinned 4.40.1 / 2.3.0; `nltk` must stay `<3.10`
-(3.10 rejects corpus paths outside its sandbox). Evaluation during training uses the PTB **test** split.
+(3.10 rejects corpus paths outside its sandbox). Checkpoints are selected on PTB dev; the summary json also records
+test LAS/UAS at the best dev epoch. `--linear-time` trains and decodes with the Triton kernels below.
 The CTB/UD files are not wired in: `const.DEP_PATH` is fixed to `data/ptb/`.
 
 
@@ -42,7 +43,7 @@ the repo's scoring/loss with an exact realizer): `python -m pytest tests/ -q` (o
 (greedy heads), and `arc_loss(f, g, heads, lengths)` (equal to the repo's arc cross-entropy with hard max). `f`, `g` are
 the two `(B, N, 2)` halves of the realizer output (`tosets`, `tosets_prime`). One program per sentence: bitonic sort of
 heads and dependents by f1 - f2, then forward/reverse log-space scans. The model itself still uses the quadratic,
-smooth-max scores; these functions are not wired into `ModelForPartialOrder` yet.
+smooth-max scores unless `run.py train --linear-time` is given.
 Tests: `python -m pytest tests/test_linear_order.py -q` (GPU, or the Triton interpreter with `CUDA_VISIBLE_DEVICES=`).
 Benchmark: `python scripts/bench_linear_order.py` (GH200, batch 32, fwd+bwd of Z): flat ~0.65 ms for N = 32..4096 vs
 0.6 / 3.6 / 13.7 / 54.9 ms for the score matrix at N = 256 / 1024 / 2048 / 4096 (memory 84 MB -> 21.5 GB vs < 10 MB).
