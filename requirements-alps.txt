@@ -1,0 +1,5 @@
+# Extra deps on top of the CSCS pytorch uenv (pytorch/v2.9.1:v2 provides torch 2.9.1, transformers 4.57,
+# tokenizers, tensorboard, numpy, tqdm, huggingface_hub).
+nltk<3.10  # 3.10 sandboxes CorpusReader paths and rejects data/ptb
+scikit-learn
+bitsandbytes
