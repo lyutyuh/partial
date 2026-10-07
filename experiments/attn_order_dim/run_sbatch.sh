@@ -22,6 +22,7 @@ REPO=/users/tliu/repos/partial
 STEPS=${STEPS:-1500}
 CONFIGS=${CONFIGS:-}
 TAG=${TAG:-base}
+LAYERS=${LAYERS:-$(seq 0 27 | tr '\n' ' ')}  # split alternately across the 2 GPUs of each model
 export HF_HOME=$ROOT/hf_cache HF_HUB_CACHE=$ROOT/hf_cache/hub HF_HUB_OFFLINE=1 PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=8
 cd "$REPO"
@@ -42,7 +43,7 @@ cfg=""; [ -n "$CONFIGS" ] && cfg="--configs $CONFIGS"
 
 for m in 0.6B 1.7B; do
   for parity in 0 1; do
-    layers=$(seq $parity 2 27 | tr '\n' ' ')
+    layers=$(echo $LAYERS | tr ' ' '\n' | awk -v p=$parity 'NR % 2 == 1 - p' | tr '\n' ' ')
     run "$OUT/fit_${m}_p${parity}_${TAG}_${SLURM_JOB_ID}.log" .venv/bin/python experiments/attn_order_dim/fit.py \
         --data "$OUT/data/qwen3-${m}" --layers $layers --steps $STEPS $cfg \
         --out "$OUT/results/qwen3-${m}_p${parity}_${TAG}_${SLURM_JOB_ID}.jsonl" &

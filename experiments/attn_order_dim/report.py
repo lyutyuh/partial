@@ -34,11 +34,16 @@ def main():
     parser.add_argument("--min-nonsink", type=float, default=1000)
     args = parser.parse_args()
 
-    by_model = collections.defaultdict(list)
+    # files are read in the given order; a (layer, scorer, K, mask) re-run in a later file replaces the earlier one,
+    # so a layer cut off by a wall-clock limit and re-run elsewhere is counted once
+    latest = collections.defaultdict(dict)
     for path in args.files:
         model = path.split("/")[-1].split("_p")[0]
         with open(path) as fh:
-            by_model[model] += [json.loads(line) for line in fh]
+            for line in fh:
+                r = json.loads(line)
+                latest[model][(r["layer"], r["scorer"], r.get("K"), r.get("masked"))] = r
+    by_model = {model: list(recs.values()) for model, recs in latest.items()}
 
     for model, recs in sorted(by_model.items()):
         heur = {r["layer"]: r["heuristics"] for r in recs if r["scorer"] == "heuristics"}
