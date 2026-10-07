@@ -36,6 +36,17 @@ the repo's scoring/loss with an exact realizer): `python -m pytest tests/ -q` (o
 `uenv run --view=default pytorch/v2.9.1:v2 --` and use `.venv/bin/python`).
 
 
+## Linear-time Triton kernels
+`learning/linear_order.py` implements Alg. 1 (K = 2, hard max of Eq. 2) without the (N, N) score matrix:
+`log_partition(f, g, lengths)` (the per-word arc softmax normaliser, with a Triton backward), `decode(...)`
+(greedy heads), and `arc_loss(f, g, heads, lengths)` (equal to the repo's arc cross-entropy with hard max). `f`, `g` are
+the two `(B, N, 2)` halves of the realizer output (`tosets`, `tosets_prime`). One program per sentence: bitonic sort of
+heads and dependents by f1 - f2, then forward/reverse log-space scans. The model itself still uses the quadratic,
+smooth-max scores; these functions are not wired into `ModelForPartialOrder` yet.
+Tests: `python -m pytest tests/test_linear_order.py -q` (GPU, or the Triton interpreter with `CUDA_VISIBLE_DEVICES=`).
+Benchmark: `python scripts/bench_linear_order.py` (GH200, batch 32, fwd+bwd of Z): flat ~0.65 ms for N = 32..4096 vs
+0.6 / 3.6 / 13.7 / 54.9 ms for the score matrix at N = 256 / 1024 / 2048 / 4096 (memory 84 MB -> 21.5 GB vs < 10 MB).
+
 ## Training
 
 For running one single experiment:
