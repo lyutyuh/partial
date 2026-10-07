@@ -30,6 +30,12 @@ which `setup_alps.sh` creates as symlinks to the `ptb_*_3.3.0.sd.clean` files.
 
 
 
+## Tests
+CPU tests of the paper's claims (token-split structures, trees are 2-dimensional, Algorithm 1 vs. brute force,
+the repo's scoring/loss with an exact realizer): `python -m pytest tests/ -q` (on Alps: prefix with
+`uenv run --view=default pytorch/v2.9.1:v2 --` and use `.venv/bin/python`).
+
+
 ## Training
 
 For running one single experiment:
