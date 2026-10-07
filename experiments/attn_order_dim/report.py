@@ -14,6 +14,12 @@ import json
 
 import numpy as np
 
+# numbers per token per side (query side also gets one gate per component for omix / ogrp); mirrors fit.py
+WIDTH = {"order": lambda k: k, "dot": lambda k: k, "osum": lambda m: 2 * m, "omix": lambda m: 2 * m,
+         "ogrp": lambda m: 6 * m}
+PER_LAYER = [("order", 2), ("osum", 4), ("osum", 16), ("omix", 16), ("ogrp", 8), ("dot", 16), ("dot", 32),
+             ("dot", 64), ("dot", 128)]
+
 
 def head_type(h, heur):
     if heur["sink"][h] >= 0.9:
@@ -57,18 +63,22 @@ def main():
 
         groups = ["all"] + [t for t in ("prev", "self", "induction", "other", "sink") if n_types.get(t)]
         print("non-sink top-1 accuracy, mean over heads (fraction of heads >= 0.9 of the dot-128 ceiling)")
-        print(f"| scorer | K | mask | heads | confident-query acc | " + " | ".join(groups) + " |")
-        print("|---|---|---|---|---|" + "---|" * len(groups))
-        order = sorted(rows, key=lambda k: (k[0] != "order", not k[2], k[1]))
+        print(f"| scorer | K | width | mask | heads | confident-query acc | " + " | ".join(groups) + " |")
+        print("|---|---|---|---|---|---|" + "---|" * len(groups))
+        order = sorted(rows, key=lambda k: (not k[2], WIDTH[k[0]](k[1]), k[0]))
         for key in order:
             cells = []
             for g in groups:
                 a, rl = rows[key].get(g + ":acc", []), rows[key].get(g + ":rel", [])
                 cells.append(f"{np.mean(a):.3f} ({np.mean(np.array(rl) >= 0.9):.0%}, n={len(a)})" if a else "-")
-            print(f"| {key[0]} | {key[1]} | {'causal' if key[2] else 'none'} | {len(rows[key]['all:acc'])} | "
+            print(f"| {key[0]} | {key[1]} | {WIDTH[key[0]](key[1])} | {'causal' if key[2] else 'none'} | "
+                  f"{len(rows[key]['all:acc'])} | "
                   f"{np.mean(rows[key]['all:conf']):.3f} | " + " | ".join(cells) + " |")
 
-        print("\nper-layer mean non-sink accuracy: order K=1..4 (causal) | dot K=2 | dot-128")
+        present = [c for c in PER_LAYER if any(r["scorer"] == c[0] and r["K"] == c[1] for r in fits)]
+        if not present:
+            present = [("order", k) for k in (1, 2, 3, 4)] + [("dot", 2), ("dot", 128)]
+        print("\nper-layer mean non-sink accuracy (causal): " + " ".join(f"{a}{k}" for a, k in present))
         for l in sorted(heur):
             def m(scorer, k, masked=True):
                 rr = [r for r in fits if r["layer"] == l and r["scorer"] == scorer and r["K"] == k and
@@ -77,8 +87,7 @@ def main():
                     return "  -  "
                 ok = np.array(rr[0]["n_nonsink"]) >= args.min_nonsink
                 return f"{np.mean(np.array(rr[0]['acc_nonsink'])[ok]):.3f}" if ok.any() else "  -  "
-            print(f"layer {l:2d}: " + " ".join(m("order", k) for k in (1, 2, 3, 4)) +
-                  f" | {m('dot', 2)} | {m('dot', 128)}")
+            print(f"layer {l:2d}: " + " ".join(m(a, k) for a, k in present))
 
 
 if __name__ == "__main__":
