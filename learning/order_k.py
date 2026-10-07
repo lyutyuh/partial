@@ -178,7 +178,68 @@ def _branches(f, g, valid, S, op, with_idx):
     return v.view(K, B, S) - fk, (i.view(K, B, S) if i is not None else None)
 
 
-def log_partition_k(f, g, lengths, include_root=True):
+def _branch_inputs(f, g, valid, K):
+    """Dominance inputs for all K branches stacked along rows: coords (K-1 lists of (K*B, S)), weights, strict."""
+    B, S, _ = f.shape
+    hcoords, qcoords, strict = [], [], []
+    for d in range(K - 1):
+        hc, qcd, st = [], [], []
+        for k in range(K):
+            j = [j for j in range(K) if j != k][d]
+            hc.append(torch.where(valid, g[..., j] - g[..., k], NEG))
+            qcd.append(f[..., j] - f[..., k])
+            st.append(torch.full((B,), j < k, dtype=torch.bool, device=f.device))
+        hcoords.append(torch.cat(hc, 0))
+        qcoords.append(torch.cat(qcd, 0))
+        strict.append(torch.cat(st, 0))
+    return hcoords, qcoords, torch.stack(strict, -1)
+
+
+class _LogPartitionK(torch.autograd.Function):
+    """Z with a hand-written backward: dg is the transposed dominance problem, run as one more fused pass."""
+
+    @staticmethod
+    def forward(ctx, f, g, valid, include_root):
+        with torch.no_grad():
+            vals, _ = _branches(f, g, valid, f.shape[1], _LogSumExp, with_idx=False)  # (K, B, S): L_k - f_k
+            if include_root:
+                vals = torch.cat([vals, torch.zeros_like(vals[:1])], 0)
+            z = torch.logsumexp(vals, 0)
+        ctx.save_for_backward(f, g, valid, vals[: f.shape[-1]], z)
+        return z
+
+    @staticmethod
+    def backward(ctx, gz):
+        f, g, valid, branch, z = ctx.saved_tensors
+        B, S, K = f.shape
+        gz = torch.where(valid, gz, 0.0)
+        p = torch.exp(branch - z)  # (K, B, S): mass of branch k for query x
+        df = -(gz * p).permute(1, 2, 0)
+        if K == 1:  # every head is in every query's set: dg(y) = exp(g(y)) * sum_x gz(x) exp(-f(x) - Z(x))
+            w = torch.where(valid, g[..., 0], NEG)
+            tot = (gz * torch.exp(-f[..., 0] - z)).sum(-1, keepdim=True)
+            dg = (torch.exp(w) * tot).unsqueeze(-1)
+            return df, torch.where(valid.unsqueeze(-1), dg, 0.0), None, None
+        # transposed problem: "heads" are the queries x with log-weights log|gz(x)| - f_k(x) - Z(x) (split by sign),
+        # "queries" are the heads y; y in D_k(x) <=> -v(x) dominates -u(y), with the same strictness pattern
+        hcoords, qcoords, strict = _branch_inputs(f, g, valid, K)
+        t_h = [torch.cat([-c, -c], 0) for c in qcoords]  # (2*K*B, S): negated query coords, as heads
+        t_q = [torch.cat([-c, -c], 0) for c in hcoords]
+        t_strict = torch.cat([strict, strict], 0)
+        logw = []
+        for sign in (1.0, -1.0):
+            part = (gz * sign).clamp(min=0)
+            lw = torch.where(valid & (part > 0), torch.log(part) - z, NEG)  # (B, S)
+            logw.append(torch.cat([lw - f[..., k] for k in range(K)], 0))  # branch k rows
+        t_w = torch.cat(logw, 0)
+        T, _ = _dominance(t_h, t_w, None, t_q, t_strict, _LogSumExp)  # (2*K*B, S)
+        T = T.view(2, K, B, S)
+        gk = g.permute(2, 0, 1)  # (K, B, S)
+        dg = (torch.exp(gk + T[0]) - torch.exp(gk + T[1])).permute(1, 2, 0)
+        return df, torch.where(valid.unsqueeze(-1), dg, 0.0), None, None
+
+
+def log_partition_k(f, g, lengths, include_root=True, autograd=True):
     """Z(x) = log sum_y exp(s(x, y)) for every dependent x, any K; differentiable in f and g.
 
     Args:
@@ -186,15 +247,23 @@ def log_partition_k(f, g, lengths, include_root=True):
         g: Head realizer values, shape (B, L, K).
         lengths: Words per sentence, shape (B,); positions >= length are neither heads nor dependents.
         include_root: Add the ROOT head with score 0.
+        autograd: Differentiate through the tree with autograd (default). ``False`` uses the hand-written backward
+            (one transposed dominance pass with the upstream gradient split by sign); it is exact and equally fast
+            but peaks at about twice the memory, because the forward tree itself, not autograd's saved tensors, sets
+            the peak and the transposed pass doubles the rows.
 
     Returns:
         Z of shape (B, L), fp32, 0 at padding positions.
     """
+    in_dtype = f.dtype
     f, g, valid, S, L = _prepare(f, g, lengths)
-    vals, _ = _branches(f, g, valid, S, _LogSumExp, with_idx=False)
-    if include_root:
-        vals = torch.cat([vals, torch.zeros_like(vals[:1])], 0)
-    z = torch.logsumexp(vals, 0)
+    if autograd:
+        vals, _ = _branches(f, g, valid, S, _LogSumExp, with_idx=False)
+        if include_root:
+            vals = torch.cat([vals, torch.zeros_like(vals[:1])], 0)
+        z = torch.logsumexp(vals, 0)
+    else:
+        z = _LogPartitionK.apply(f, g, valid, include_root)
     return torch.where(valid, z, 0.0)[:, :L]
 
 

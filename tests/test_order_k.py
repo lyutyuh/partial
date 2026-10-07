@@ -119,3 +119,17 @@ def test_large_magnitudes_stable():
     z = log_partition_k(f, g, lens)
     assert torch.isfinite(z).all()
     torch.testing.assert_close(z, _z_quadratic(f, g, lens, True), rtol=1e-5, atol=1e-4)
+
+
+@pytest.mark.parametrize("K", [1, 2, 3, 4])
+@pytest.mark.parametrize("B,L", [(3, 5), (2, 33)])
+def test_custom_backward_matches_autograd(B, L, K):
+    f, g, lens = _inputs(31 + K, B, L, K)
+    gz = torch.randn(B, L, generator=torch.Generator().manual_seed(4)).to(DEVICE)
+    grads = []
+    for ag in (True, False):
+        fr, gr = f.clone().requires_grad_(), g.clone().requires_grad_()
+        (log_partition_k(fr, gr, lens, True, autograd=ag) * gz).sum().backward()
+        grads.append((fr.grad, gr.grad))
+    torch.testing.assert_close(grads[0][0], grads[1][0], rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(grads[0][1], grads[1][1], rtol=1e-4, atol=1e-5)

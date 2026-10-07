@@ -54,13 +54,18 @@ def main():
     parser.add_argument("--ks", type=int, nargs="+", default=[2, 3, 4])
     parser.add_argument("--lengths", type=int, nargs="+", default=[64, 128, 256, 512, 1024, 2048, 4096])
     parser.add_argument("--reps", type=int, default=10)
+    parser.add_argument("--custom-backward", action="store_true", help="use the hand-written transposed backward")
+    parser.add_argument("--no-decode", action="store_true")
     args = parser.parse_args()
-    print(f"device: {torch.cuda.get_device_name()}, batch {args.batch}, fp32 realizers (B, N, K)")
+    lpk = (lambda f, g, l: log_partition_k(f, g, l, True, autograd=False)) if args.custom_backward else log_partition_k
+    print(f"device: {torch.cuda.get_device_name()}, batch {args.batch}, fp32 realizers (B, N, K), "
+          f"backward = {'custom (transposed dominance)' if args.custom_backward else 'autograd'}")
     print(f"{'task':<7}{'K':>2}{'N':>6} | {'quadratic ms':>13}{'MiB':>9} | {'range-tree ms':>14}{'MiB':>9} | "
           f"{'speedup':>8} | {'triton K=2 ms':>14}")
-    for task, backward, fq, fk, ft in [("Z f+b", True, z_quadratic, log_partition_k, log_partition),
-                                       ("decode", False, decode_quadratic, lambda *a: decode_k(*a)[0],
-                                        lambda *a: decode(*a)[0])]:
+    tasks = [("Z f+b", True, z_quadratic, lpk, log_partition)]
+    if not args.no_decode:
+        tasks.append(("decode", False, decode_quadratic, lambda *a: decode_k(*a)[0], lambda *a: decode(*a)[0]))
+    for task, backward, fq, fk, ft in tasks:
         for K in args.ks:
             for n in args.lengths:
                 gen = torch.Generator(device="cuda").manual_seed(n * 10 + K)

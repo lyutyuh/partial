@@ -57,6 +57,8 @@ O(N log^(K-2) N) memory; all K branches and all levels of a depth are fused into
 `python scripts/bench_order_k.py`. Measured on a GH200 (batch 32, Z fwd+bwd): K = 3 crosses the quadratic path at
 N ~ 2k (2.1x faster at 4k, 40x less memory); K = 4 stays slower than the matrix up to N = 16k (work-bound, large
 constants) and K = 5 is impractical. For K = 2 use the Triton kernel (`linear_order.py`), 3-4x faster than this path.
+A hand-written backward (`autograd=False`: one transposed dominance pass, upstream gradient split by sign) is exact
+but not faster and peaks at twice the memory; the peak is the forward's flattened tree (all level tuples at once).
 
 ## Training
 
