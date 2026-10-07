@@ -48,6 +48,18 @@ Tests: `python -m pytest tests/test_linear_order.py -q` (GPU, or the Triton inte
 Benchmark: `python scripts/bench_linear_order.py` (GH200, batch 32, fwd+bwd of Z): flat ~0.65 ms for N = 32..4096 vs
 0.6 / 3.6 / 13.7 / 54.9 ms for the score matrix at N = 256 / 1024 / 2048 / 4096 (memory 84 MB -> 21.5 GB vs < 10 MB).
 
+## General-K aggregation (K >= 3)
+`learning/order_k.py` extends the linear-time idea to any order dimension: branch k of Eq. 2 is a (K-1)-dimensional
+dominance sum, answered by a range tree on dyadic blocks built from batched `sort` / `searchsorted` / `logcumsumexp`
+(`cummax` for decoding). Exact for any K, differentiable through autograd, O(N log^(K-1) N) time and
+O(N log^(K-2) N) memory; all K branches and all levels of a depth are fused into one sort. `log_partition_k`,
+`decode_k`, `arc_loss_k` mirror the K = 2 API. Tests: `python -m pytest tests/test_order_k.py -q`; benchmark:
+`python scripts/bench_order_k.py`. Measured on a GH200 (batch 32, Z fwd+bwd): K = 3 crosses the quadratic path at
+N ~ 2k (2.1x faster at 4k, 40x less memory); K = 4 stays slower than the matrix up to N = 16k (work-bound, large
+constants) and K = 5 is impractical. For K = 2 use the Triton kernel (`linear_order.py`), 3-4x faster than this path.
+A hand-written backward (`autograd=False`: one transposed dominance pass, upstream gradient split by sign) is exact
+but not faster and peaks at twice the memory; the peak is the forward's flattened tree (all level tuples at once).
+
 ## Training
 
 For running one single experiment:
