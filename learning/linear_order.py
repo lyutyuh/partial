@@ -27,7 +27,7 @@ import triton.language as tl
 # Finite stand-in for -inf inside the scans: (m1 - m) never becomes (-inf) - (-inf).
 NEG = -1.0e30
 _NEG = tl.constexpr(NEG)  # kernels may only read constexpr globals
-MAX_LEN = 1 << 15  # one program holds 2 * next_pow2(N) items in registers; keep sentences/documents below this
+MAX_LEN = 1 << 13  # one program sorts 2 * next_pow2(N) items; above 8192 the GH200 runs out of shared memory
 
 
 @triton.jit
@@ -62,6 +62,7 @@ def _merged_order(f1_ptr, f2_ptr, g1_ptr, g2_ptr, base, n, BLOCK: tl.constexpr):
     d2 = tl.load(f2_ptr + base + pos, mask=valid & is_dep, other=0.0)
     key = tl.where(is_dep, d1 - d2, h1 - h2)
     key = tl.where(valid, key, float("inf"))
+    key = tl.where(key == 0.0, 0.0, key)  # -0.0 -> +0.0, so equal keys always put heads first
 
     # Order-preserving float32 -> uint32 map, packed as [key:32 | is_dep:1 | pos:30] into a non-negative int64.
     bits = key.to(tl.int32, bitcast=True).to(tl.int64) & 0xFFFFFFFF
@@ -91,8 +92,8 @@ def _logz_fwd_kernel(f1_ptr, f2_ptr, g1_ptr, g2_ptr, len_ptr, z_ptr, a_ptr, b_pt
     one = tl.where(head, 1.0, 0.0)
     pm, ps = tl.associative_scan((tl.where(head, x1, _NEG), one), 0, _lse_combine)                 # heads before
     sm, ss = tl.associative_scan((tl.where(head, x2, _NEG), one), 0, _lse_combine, reverse=True)   # heads after
-    a = pm + tl.log(ps) - x1  # log-mass of branch 1; -inf when no head precedes x
-    b = sm + tl.log(ss) - x2  # log-mass of branch 2
+    a = (pm - x1) + tl.log(ps)  # log-mass of branch 1; -inf when no head precedes x
+    b = (sm - x2) + tl.log(ss)  # log-mass of branch 2 (differences first: rounds at |g - f|, not |g|)
     mx = tl.maximum(a, b)
     if ROOT:
         mx = tl.maximum(mx, 0.0)
@@ -163,6 +164,8 @@ def _split(f, g, lengths):
         raise ValueError(f"expected f, g of shape (B, L, 2), got {tuple(f.shape)} and {tuple(g.shape)}")
     if f.shape[1] > MAX_LEN:
         raise ValueError(f"sequence length {f.shape[1]} exceeds MAX_LEN={MAX_LEN}")
+    if int(lengths.max()) > f.shape[1]:
+        raise ValueError(f"lengths up to {int(lengths.max())} exceed the padded length {f.shape[1]}")
     f = f.float()
     g = g.float()
     parts = [t[..., k].contiguous() for t in (f, g) for k in (0, 1)]
@@ -238,7 +241,9 @@ def gold_arc_score(f, g, heads):
     g = g.float()
     idx = (heads.clamp(min=1) - 1).long()
     g_head = g.take_along_dim(idx.unsqueeze(-1), dim=1)
-    score = -(f - g_head).amax(dim=-1)
+    # same branch rule as the kernels, so exact F-ties send the gold gradient where log_partition sends it
+    br1 = (g_head[..., 0] - g_head[..., 1]) <= (f[..., 0] - f[..., 1])
+    score = torch.where(br1, g_head[..., 0] - f[..., 0], g_head[..., 1] - f[..., 1])
     return torch.where(heads == 0, torch.zeros_like(score), score)
 
 
