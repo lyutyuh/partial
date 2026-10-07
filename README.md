@@ -12,7 +12,21 @@ conda activate partial
 
 
 
+### On CSCS Alps (Clariden, GH200)
+No conda there; use the pytorch uenv plus a venv (`requirements-alps.txt` lists the extras):
+```bash
+bash setup_alps.sh                     # venv, data/ptb/*.gold.conllu symlinks, encoders -> /capstor/store cache
+sbatch run_ptb_sbatch.sh               # 4 single-GPU arms on one node: {xlnet-large-cased, bert-base-cased} x K in {2, 4}
+ARMS="xlnet-large-cased:2" EPOCHS=1 sbatch run_ptb_sbatch.sh   # custom arms
+```
+Notes: the uenv's transformers 4.57 / torch 2.9.1 replace the pinned 4.40.1 / 2.3.0; `nltk` must stay `<3.10`
+(3.10 rejects corpus paths outside its sandbox). Evaluation during training uses the PTB **test** split.
+The CTB/UD files are not wired in: `const.DEP_PATH` is fixed to `data/ptb/`.
+
+
 ## Getting The Data
+PTB (Stanford dependencies 3.3.0) is included in `data/ptb/`; the loader expects `{train,dev,test}.gold.conllu`,
+which `setup_alps.sh` creates as symlinks to the `ptb_*_3.3.0.sd.clean` files.
 
 
 
