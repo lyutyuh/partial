@@ -60,6 +60,19 @@ constants) and K = 5 is impractical. For K = 2 use the Triton kernel (`linear_or
 A hand-written backward (`autograd=False`: one transposed dominance pass, upstream gradient split by sign) is exact
 but not faster and peaks at twice the memory; the peak is the forward's flattened tree (all level tuples at once).
 
+## Causal order attention (prefill + decoding)
+`learning/order_attention.py` turns a K = 2 order head (with a learned sink logit) into an attention layer without the
+N x N matrix: `order_attention(f, g, b, V, causal=True)` computes softmax(order scores) @ V by online-softmax
+prefix / suffix "chunk scans" over rank-sorted dyadic position blocks (a position tree; O(N d log N), autograd
+backward), and `OrderCache` replaces the KV cache at decode time with rank-sorted blocks of sizes 2^i (logarithmic
+method; insert-then-query, so causality is the insertion order and costs nothing). Both match the dense reference to
+1e-5 for prefill, gradients, unmasked attention and prefill-then-decode (`tests/test_order_attention.py`).
+Benchmark (`scripts/bench_order_attention.py`, GH200, H=16, d=128): these pure-torch references have the right
+scaling (prefill ~2x per doubling of N, decode query flat in N) but large constants: prefill is 10-100x slower than
+the dense order reference below 8k tokens (and ~70x slower than bf16 SDPA at 16k), and the decode query costs
+~5.4 ms/token at any N from 1k to 262k (launch-bound: ~log N blocks x ~10 small ops) vs 0.09-2.1 ms for a KV-cache
+dot product. Fused kernels are required for either to pay off; the module is the verified reference for them.
+
 ## Training
 
 For running one single experiment:
