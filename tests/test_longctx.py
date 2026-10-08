@@ -188,3 +188,54 @@ def test_training_reduces_kl():
         assert last < first, (sc, s["curve"])
         assert set(s["final_kl"]) == {"1", "2"}
     assert set(students["omix4"]) == {1, 2}
+
+
+@pytest.mark.skipif(DEVICE != "cuda", reason="the Triton kernels need a GPU")
+@pytest.mark.parametrize("scorer", ["order1", "omix4"])
+def test_triton_attend_matches_torch_path_and_grads(scorer):
+    """``impl='triton'`` gives the dense training formula's output and the same student-parameter gradients as the
+    torch position tree (autograd through order_attention / mixture_attention)."""
+    model, st = _model(), _student(scorer, seed=3)
+    N = 150
+    gen = torch.Generator().manual_seed(2)
+    h = torch.randn(1, N, D_MODEL, generator=gen).to(DEVICE)
+    V = torch.randn(1, H, N, HEAD_DIM, generator=gen).to(DEVICE)
+    w = torch.randn(1, H, N, HEAD_DIM, generator=gen).to(DEVICE)
+    pos = torch.arange(N, device=DEVICE)
+    causal = torch.ones(N, N, dtype=torch.bool, device=DEVICE).tril()
+    cs = _cos_sin(model, pos)
+    with torch.no_grad():
+        ref = longctx.student_log_probs(st, st(h, pos), causal, cs).exp() @ V
+    grads = {}
+    for impl in ("torch", "triton"):
+        st.zero_grad(set_to_none=True)
+        o = longctx.student_attend(st, st(h, pos), V, cs, impl=impl)
+        torch.testing.assert_close(o.detach(), ref, rtol=1e-4, atol=1e-5)
+        (o * w).sum().backward()
+        grads[impl] = [p.grad.clone() for p in st.parameters()]
+    for gt, gr in zip(grads["triton"], grads["torch"]):
+        torch.testing.assert_close(gt, gr, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.skipif(DEVICE != "cuda", reason="the Triton kernels need a GPU")
+@pytest.mark.parametrize("scorer", ["order1", "omix4"])
+def test_replaced_model_triton_matches_torch(scorer):
+    """The replaced model's logits through ``impl='triton'`` match ``impl='torch'`` and the dense path."""
+    model = _model()
+    students = {l: _student(scorer, seed=l) for l in (1, 2)}
+    ids = torch.randint(0, 101, (1, 300), generator=torch.Generator().manual_seed(1)).to(DEVICE)
+    res = longctx.consistency(model, students, [1, 2], ids, impl="triton")
+    assert res["max_abs_logit_diff"] < 1e-4
+    logits = {}
+    with torch.no_grad():
+        for impl in ("torch", "triton"):
+            with longctx.replaced(model, students, [1, 2], impl=impl):
+                logits[impl] = model(input_ids=ids, use_cache=False).logits
+    torch.testing.assert_close(logits["triton"], logits["torch"], rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.skipif(DEVICE != "cuda", reason="the Triton kernels need a GPU")
+@pytest.mark.parametrize("M", [1, 4])
+def test_bench_triton_impl(M):
+    row = longctx.bench_order_attention(512, H=2, d=16, M=M, reps=1, impl="triton")
+    assert row["finite"] and row["impl"] == "triton" and row["M"] == M

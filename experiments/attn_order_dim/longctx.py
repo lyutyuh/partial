@@ -25,9 +25,10 @@ jointly; the teacher is shared between scorers). Student dense log-probs use the
 Evaluation uses the WikiText-103 test stream only: the first --eval-tokens (9 x 32768) tokens are cut into
 non-overlapping windows of N tokens, so every N scores the same tokens; ppl = exp(mean NLL over all next-token
 predictions); the tables also give the NLL gap to the base model at every N. Replaced layers keep v_proj / repeat_kv /
-o_proj; order1 and omix4 run through the sub-quadratic ``order_attention`` / ``mixture_attention``, rope128(s) through
-SDPA. Recall@k: fraction of queries whose teacher top key (argmax of the real head's causal attention, computed in
-query chunks) is among the student's top-k keys.
+o_proj; order1 and omix4 run through the sub-quadratic ``order_attention`` / ``mixture_attention`` (``--impl torch``,
+the default) or their Triton kernels ``order_attention_triton`` / ``mixture_attention_triton`` (``--impl triton``, also
+used by the bench stage), rope128(s) through SDPA. Recall@k: fraction of queries whose teacher top key (argmax of the
+real head's causal attention, computed in query chunks) is among the student's top-k keys.
 
 Stages (``--stages``): train, ppl, recall, consistency (order_attention vs dense_order_attention logits), bench
 (order_attention memory/time). Each run writes <out>/<tag>_part_<part>.json; ``--merge`` joins the parts into
@@ -163,8 +164,9 @@ def student_log_probs(student, out, causal, cos_sin):
     return torch.logsumexp(mix, dim=-1).masked_fill(~causal, NEG)
 
 
-def student_attend(student, out, V, cos_sin, dense=False):
-    """Causal attention output (B, H, n, d) of the student; sub-quadratic for order scorers unless ``dense``."""
+def student_attend(student, out, V, cos_sin, dense=False, impl="torch"):
+    """Causal attention output (B, H, n, d) of the student; sub-quadratic for order scorers unless ``dense``, through
+    ``order_attention`` / ``mixture_attention`` (``impl`` 'torch') or their Triton kernels (``impl`` 'triton')."""
     if student.M == 0:
         q, k = apply_rotary_pos_emb(out["q"], out["k"], *cos_sin)
         if "b" in out:
@@ -176,6 +178,11 @@ def student_attend(student, out, V, cos_sin, dense=False):
             return dense_order_attention(*comps[0], V)
         w = torch.softmax(out["gates"].float(), dim=-1)
         return sum(w[..., m:m + 1] * dense_order_attention(*c, V) for m, c in enumerate(comps))
+    if impl == "triton":
+        from learning.order_attention_triton import mixture_attention_triton, order_attention_triton
+        if student.M == 1:
+            return order_attention_triton(*comps[0], V)
+        return mixture_attention_triton(out["gates"], comps, V)
     if student.M == 1:
         return order_attention(*comps[0], V, causal=True)
     return mixture_attention(out["gates"], comps, V, causal=True)
@@ -225,9 +232,9 @@ def capture(model, layers):
 class ReplacedAttention(nn.Module):
     """Qwen3 attention whose weights come from a student for all heads; v_proj, repeat_kv and o_proj are the layer's."""
 
-    def __init__(self, attn, student, dense=False):
+    def __init__(self, attn, student, dense=False, impl="torch"):
         super().__init__()
-        self.attn, self.student, self.dense = attn, student, dense
+        self.attn, self.student, self.dense, self.impl = attn, student, dense, impl
 
     def forward(self, hidden_states, position_embeddings=None, attention_mask=None, position_ids=None, **kwargs):
         at = self.attn
@@ -236,17 +243,17 @@ class ReplacedAttention(nn.Module):
         v = repeat_kv(v, at.num_key_value_groups)
         pos = position_ids[0] if position_ids is not None else torch.arange(n, device=hidden_states.device)
         out = self.student(hidden_states, pos)
-        o = student_attend(self.student, out, v.float(), position_embeddings, self.dense)
+        o = student_attend(self.student, out, v.float(), position_embeddings, self.dense, self.impl)
         return at.o_proj(o.to(v.dtype).transpose(1, 2).reshape(B, n, -1)), None
 
 
 @contextlib.contextmanager
-def replaced(model, students, layers, dense=False):
-    """Temporarily replaces the attention of ``layers`` with ``students[l]``."""
+def replaced(model, students, layers, dense=False, impl="torch"):
+    """Temporarily replaces the attention of ``layers`` with ``students[l]`` (order scorers through ``impl``)."""
     orig = {l: model.model.layers[l].self_attn for l in layers}
     try:
         for l in layers:
-            model.model.layers[l].self_attn = ReplacedAttention(orig[l], students[l], dense)
+            model.model.layers[l].self_attn = ReplacedAttention(orig[l], students[l], dense, impl)
         yield
     finally:
         for l in layers:
@@ -466,11 +473,12 @@ def recall_eval(model, students, layers, tokens, N, max_windows, ks, q_chunk=512
 
 
 @torch.no_grad()
-def consistency(model, students, layers, ids):
-    """Max |logit difference| of the model with ``layers`` replaced through order_attention vs dense_order_attention."""
+def consistency(model, students, layers, ids, impl="torch"):
+    """Max |logit difference| of the model with ``layers`` replaced through the sub-quadratic path (``impl``) vs
+    dense_order_attention."""
     outs = []
     for dense in (False, True):
-        with replaced(model, students, layers, dense=dense):
+        with replaced(model, students, layers, dense=dense, impl=impl):
             outs.append(model(input_ids=ids, use_cache=False).logits.float())
     nll = [F.cross_entropy(o[0, :-1], ids[0, 1:]).item() for o in outs]
     return {"max_abs_logit_diff": (outs[0] - outs[1]).abs().max().item(),
@@ -478,14 +486,20 @@ def consistency(model, students, layers, ids):
 
 
 @torch.no_grad()
-def bench_order_attention(N, H=16, d=128, M=1, reps=3, device="cuda"):
-    """Time and peak extra memory of one no-grad order_attention (M = 1) or mixture_attention (M > 1) forward."""
+def bench_order_attention(N, H=16, d=128, M=1, reps=3, device="cuda", impl="torch"):
+    """Time and peak extra memory of one no-grad order_attention (M = 1) or mixture_attention (M > 1) forward, or of
+    their Triton kernels (``impl`` 'triton')."""
     gen = torch.Generator(device="cpu").manual_seed(N)
     rnd = lambda *s: (torch.randn(*s, generator=gen) * 2).to(device)  # noqa: E731
     pos = torch.arange(N, dtype=torch.float32, device=device)[:, None] * 0.01
     comps = [(rnd(1, H, N, 2) + pos, rnd(1, H, N, 2) + pos, rnd(1, H, N)) for _ in range(M)]
     V, gates = rnd(1, H, N, d), rnd(1, H, N, M)
-    fn = (lambda: order_attention(*comps[0], V)) if M == 1 else (lambda: mixture_attention(gates, comps, V))
+    if impl == "triton":
+        from learning.order_attention_triton import mixture_attention_triton, order_attention_triton
+        fn = (lambda: order_attention_triton(*comps[0], V)) if M == 1 else (
+            lambda: mixture_attention_triton(gates, comps, V))
+    else:
+        fn = (lambda: order_attention(*comps[0], V)) if M == 1 else (lambda: mixture_attention(gates, comps, V))
     fn()
     torch.cuda.synchronize()
     base = torch.cuda.memory_allocated()
@@ -505,7 +519,7 @@ def bench_order_attention(N, H=16, d=128, M=1, reps=3, device="cuda"):
     for _ in range(reps):
         F.scaled_dot_product_attention(q, q, V, is_causal=True)
     torch.cuda.synchronize()
-    return {"N": N, "H": H, "d": d, "M": M, "seconds": round(sec, 4), "peak_extra_gb": round(peak, 3),
+    return {"N": N, "H": H, "d": d, "M": M, "impl": impl, "seconds": round(sec, 4), "peak_extra_gb": round(peak, 3),
             "finite": finite, "sdpa_fp32_seconds": round((time.time() - t0) / reps, 4)}
 
 
@@ -551,6 +565,12 @@ def merge(out_dir, tag):
     return res
 
 
+def _label(row):
+    """Scorer name of a result row; order scorers evaluated through the Triton kernels are marked '/triton'."""
+    tri = row.get("impl", "torch") == "triton" and COMPONENTS.get(row["scorer"], 0) > 0
+    return row["scorer"] + ("/triton" if tri else "")
+
+
 def print_tables(res):
     print(f"== {res.get('model')}")
     rows = res.get("ppl", [])
@@ -558,9 +578,9 @@ def print_tables(res):
     if rows:
         print("perplexity (WikiText-103 test, same tokens at every N)")
         print(f"{'scorer':10s} {'layers':7s} " + " ".join(f"{n:>8d}" for n in Ns))
-        keys = sorted({(r["scorer"], r["layers"]) for r in rows}, key=lambda t: (t[0] != "base", t[1] != "22-27", t))
+        keys = sorted({(_label(r), r["layers"]) for r in rows}, key=lambda t: (t[0] != "base", t[1] != "22-27", t))
         for sc, ls in keys:
-            vals = {r["N"]: r["ppl"] for r in rows if (r["scorer"], r["layers"]) == (sc, ls)}
+            vals = {r["N"]: r["ppl"] for r in rows if (_label(r), r["layers"]) == (sc, ls)}
             print(f"{sc:10s} {ls:7s} " + " ".join(f"{vals[n]:8.3f}" if n in vals else f"{'-':>8s}" for n in Ns))
         base = {r["N"]: r["nll"] for r in rows if r["scorer"] == "base"}
         if base:
@@ -569,7 +589,7 @@ def print_tables(res):
             for sc, ls in keys:
                 if sc != "base":
                     gap = {r["N"]: r["nll"] - base[r["N"]] for r in rows
-                           if (r["scorer"], r["layers"]) == (sc, ls) and r["N"] in base}
+                           if (_label(r), r["layers"]) == (sc, ls) and r["N"] in base}
                     print(f"{sc:10s} {ls:7s} " + " ".join(f"{gap[n]:+8.4f}" if n in gap else f"{'-':>8s}" for n in Ns))
     rows = res.get("recall", [])
     if rows:
@@ -584,11 +604,11 @@ def print_tables(res):
                 vals = {r["N"]: r[metric] for r in rows if r["layer"] == l}
                 print(f"{l:<6d} " + " ".join(f"{vals[n]:8.4f}" if n in vals else f"{'-':>8s}" for n in Ns))
     for r in res.get("consistency", []):
-        print(f"consistency {r['scorer']}: max |logit diff| {r['max_abs_logit_diff']:.2e} "
+        print(f"consistency {_label(r)}: max |logit diff| {r['max_abs_logit_diff']:.2e} "
               f"(max |logit| {r['max_abs_logit']:.1f}), NLL {r['nll_fast']:.5f} vs {r['nll_dense']:.5f}")
     for r in res.get("bench", []):
-        print(f"bench order_attention N={r['N']} M={r['M']}: {r['seconds'] * 1e3:.1f} ms, peak extra "
-              f"{r['peak_extra_gb']:.2f} GB (SDPA fp32 {r['sdpa_fp32_seconds'] * 1e3:.1f} ms)")
+        print(f"bench order_attention ({r.get('impl', 'torch')}) N={r['N']} M={r['M']}: {r['seconds'] * 1e3:.1f} ms, "
+              f"peak extra {r['peak_extra_gb']:.2f} GB (SDPA fp32 {r['sdpa_fp32_seconds'] * 1e3:.1f} ms)")
 
 
 def parse_layers(spec):
@@ -632,6 +652,9 @@ def main():
     p.add_argument("--recall-ks", type=int, nargs="+", default=[1, 8, 64, 256])
     p.add_argument("--q-chunk", type=int, default=512)
     p.add_argument("--bench-lengths", type=int, nargs="*", default=[8192, 16384, 32768])
+    p.add_argument("--impl", choices=["torch", "triton"], default="torch",
+                   help="order1 / omix4 evaluation forward and bench stage: torch position tree (order_attention, "
+                        "mixture_attention) or the Triton kernels (learning/order_attention_triton.py)")
     args = p.parse_args()
 
     tag = args.tag or "qwen3-" + args.model.split("Qwen3-")[-1].split("-")[0]
@@ -678,7 +701,8 @@ def main():
         ids = test[:2048][None].cuda()
         for sc in ("order1", "omix4"):
             if sc in avail:
-                row = {"scorer": sc, "N": 2048, "layers": "22-27", **consistency(model, avail[sc], REPLACED, ids)}
+                row = {"scorer": sc, "N": 2048, "layers": "22-27", "impl": args.impl,
+                       **consistency(model, avail[sc], REPLACED, ids, args.impl)}
                 part.add("consistency", row)
                 print(f"consistency {sc}: {row}", flush=True)
 
@@ -691,9 +715,9 @@ def main():
                                   if sc in avail and N in args.subset_lengths]:
                 with contextlib.ExitStack() as stack:
                     if sc != "base":
-                        stack.enter_context(replaced(model, avail[sc], parse_layers(ls)))
-                    row = {"scorer": sc, "layers": ls or "", **perplexity(model, test, N, args.max_windows,
-                                                                         args.batch_tokens)}
+                        stack.enter_context(replaced(model, avail[sc], parse_layers(ls), impl=args.impl))
+                    row = {"scorer": sc, "layers": ls or "", "impl": args.impl,
+                           **perplexity(model, test, N, args.max_windows, args.batch_tokens)}
                 part.add("ppl", row)
                 if sc == "base":
                     base_nll[N] = row["nll"]
@@ -718,7 +742,8 @@ def main():
     if "bench" in args.stages:
         for N in args.bench_lengths:
             for M in (1, 4):
-                row = bench_order_attention(N, model.config.num_attention_heads, model.config.head_dim, M)
+                row = bench_order_attention(N, model.config.num_attention_heads, model.config.head_dim, M,
+                                            impl=args.impl)
                 part.add("bench", row)
                 print(f"bench {row}", flush=True)
                 torch.cuda.empty_cache()
