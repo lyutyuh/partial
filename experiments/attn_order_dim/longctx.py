@@ -260,10 +260,14 @@ def replaced(model, students, layers, dense=False, impl="torch"):
             model.model.layers[l].self_attn = orig[l]
 
 
-def load_stream(tokenizer, split):
-    """WikiText-103 raw split as one token stream without special tokens."""
-    path = glob.glob(os.path.join(os.environ["HF_HUB_CACHE"], "datasets--" + WIKI.format(split=split)))[0]
-    text = "".join(pq.read_table(path).column("text").to_pylist())
+def load_stream(tokenizer, split, max_chars=None):
+    """WikiText-103 raw split as one token stream without special tokens (the train split spans two parquet files;
+    ``max_chars`` truncates the text before tokenisation)."""
+    pattern = os.path.join(os.environ["HF_HUB_CACHE"], "datasets--" + WIKI.format(split=split))
+    paths = sorted(glob.glob(pattern.replace("-00000-of-00001", "-*")))
+    text = "".join("".join(pq.read_table(p).column("text").to_pylist()) for p in paths)
+    if max_chars:
+        text = text[:max_chars]
     return torch.tensor(tokenizer(text, add_special_tokens=False)["input_ids"], dtype=torch.long)
 
 
@@ -346,6 +350,70 @@ def train_students(model, scorers, layers, tokens, steps, t_train, batch, lr, se
         for st in students[sc].values():
             st.eval()
     return students, stats
+
+
+def finetune_students(model, students, layers, tokens, steps, t_ft, lr, seed, warmup=50, impl="triton",
+                      logit_chunk=LOGIT_CHUNK, log_every=25, log=print):
+    """Fine-tunes ``students`` (replacing the attention of ``layers``) end to end on the model's own output.
+
+    Each step takes a window of ``t_ft`` tokens from ``tokens``; the frozen base model gives the target next-token
+    distributions, and the model with ``layers`` replaced (order scorers through the sub-quadratic ``impl`` path,
+    dot-product controls through SDPA) is trained to match them: loss = mean over predictions of
+    KL(base || replaced). Only the students' parameters receive gradients (layers below the first replaced layer build
+    no autograd graph, since nothing upstream requires grad). The lm_head runs on chunks of ``logit_chunk`` positions
+    whose gradients are accumulated into the final hidden state before one backward through the replaced layers.
+
+    Returns stats {curve, final_kl, seconds}.
+    """
+    device = next(model.parameters()).device
+    params = [p for st in students.values() for p in st.parameters()]
+    for st in students.values():
+        st.train()
+        for prm in st.parameters():
+            prm.requires_grad_(True)
+    opt = torch.optim.AdamW(params, lr=lr, weight_decay=0.0)
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda t: min(1.0, (t + 1) / warmup) * 0.5 * (
+        1 + math.cos(math.pi * min(t, steps) / steps)))
+    gen = torch.Generator().manual_seed(seed)
+    curve, tail, acc = [], [], 0.0
+    t0 = time.time()
+    for step in range(steps):
+        start = int(torch.randint(0, tokens.shape[0] - t_ft + 1, (1,), generator=gen))
+        ids = tokens[start:start + t_ft][None].to(device)
+        with torch.no_grad():
+            h_base = model.model(input_ids=ids, use_cache=False).last_hidden_state[:, :-1]
+        with replaced(model, students, layers, impl=impl):
+            h_rep = model.model(input_ids=ids, use_cache=False).last_hidden_state[:, :-1]
+        h_leaf = h_rep.detach().requires_grad_(True)
+        n_pred = h_leaf.shape[1]
+        total = 0.0
+        for j in range(0, n_pred, logit_chunk):
+            with torch.no_grad():
+                lt = torch.log_softmax(model.lm_head(h_base[:, j:j + logit_chunk]).float(), dim=-1)
+            ls = torch.log_softmax(model.lm_head(h_leaf[:, j:j + logit_chunk]).float(), dim=-1)
+            kl = (lt.exp() * (lt - ls)).sum() / n_pred
+            kl.backward()
+            total += kl.item()
+            del lt, ls, kl
+        h_rep.backward(h_leaf.grad)
+        torch.nn.utils.clip_grad_norm_(params, 1.0)
+        opt.step()
+        sched.step()
+        opt.zero_grad(set_to_none=True)
+        acc += total
+        if step >= steps - 50:
+            tail.append(total)
+        if (step + 1) % log_every == 0 or step + 1 == steps:
+            n_int = (step % log_every) + 1
+            curve.append([step + 1, acc / n_int])
+            log(f"  ft step {step + 1}/{steps} ({time.time() - t0:.0f}s): KL(base || replaced) {acc / n_int:.4f} nats "
+                f"per prediction", flush=True)
+            acc = 0.0
+        del h_base, h_rep, h_leaf
+    for st in students.values():
+        st.eval()
+    return {"steps": steps, "t_ft": t_ft, "lr": lr, "impl": impl, "seconds": round(time.time() - t0, 1),
+            "curve": curve, "final_kl": sum(tail) / max(len(tail), 1)}
 
 
 # --------------------------------------------------------------------------------------------------------- evaluation
@@ -663,7 +731,8 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--tag", default=None, help="result file prefix (default: qwen3-<size> from the model name)")
     p.add_argument("--part", default=None, help="name of this run's part file (default: the stages)")
-    p.add_argument("--stages", nargs="*", default=[], choices=["train", "ppl", "recall", "consistency", "bench"])
+    p.add_argument("--stages", nargs="*", default=[],
+                   choices=["train", "finetune", "ppl", "recall", "consistency", "bench"])
     p.add_argument("--merge", action="store_true")
     p.add_argument("--scorers", nargs="+", default=["order1", "omix4", "rope128", "rope128s"], choices=list(COMPONENTS))
     p.add_argument("--student-layers", type=int, nargs="+", default=RECALL_ONLY + REPLACED)
@@ -677,6 +746,15 @@ def main():
     p.add_argument("--max-slope", type=float, default=0.015)
     p.add_argument("--slope-lr-mult", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=0)
+    # end-to-end fine-tuning (stage 'finetune'): students from --init-from, KL(base || replaced) on the train split
+    p.add_argument("--init-from", default=None, help="directory holding the students to start from (default: --out)")
+    p.add_argument("--ft-steps", type=int, default=400)
+    p.add_argument("--ft-len", type=int, default=16384)
+    p.add_argument("--ft-lr", type=float, default=3e-4)
+    p.add_argument("--ft-warmup", type=int, default=40)
+    p.add_argument("--ft-tf32", type=int, default=1, help="TF32 matmuls during fine-tuning (1) or full fp32 (0)")
+    p.add_argument("--ft-train-chars", type=int, default=100_000_000,
+                   help="characters of the WikiText-103 train split to tokenise for fine-tuning (~0.25 tokens/char)")
     # evaluation
     p.add_argument("--eval-tokens", type=int, default=9 * 32768)
     p.add_argument("--lengths", type=int, nargs="+", default=[512, 2048, 8192, 16384, 32768])
@@ -730,6 +808,28 @@ def main():
                 print(f"{sc}: final KL per layer {json.dumps(kl)} ({stats[sc]['seconds']}s)", flush=True)
             del students
             torch.cuda.empty_cache()
+
+    if "finetune" in args.stages:
+        src = args.init_from or args.out
+        # TF32 matmuls for the fine-tuning forwards/backwards only (two 16k-token fp32 forwards and the 152k-vocab
+        # lm_head dominate a step); evaluation below restores full fp32
+        tf32 = torch.backends.cuda.matmul.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = args.ft_tf32
+        train_tokens = load_stream(tokenizer, "train", args.ft_train_chars)
+        print(f"fine-tuning {args.scorers} (layers {REPLACED}) from {src} on {train_tokens.shape[0]} train tokens, "
+              f"{args.ft_steps} steps x {args.ft_len} tokens, lr {args.ft_lr}, impl {args.impl}", flush=True)
+        for sc in args.scorers:
+            students = load_students(os.path.join(src, f"{tag}_students_{sc}.pt"), "cuda")
+            stats = finetune_students(model, students, REPLACED, train_tokens, args.ft_steps, args.ft_len,
+                                      args.ft_lr, args.seed, args.ft_warmup, args.impl)
+            stats["init_from"] = src
+            save_students(students, student_path(sc))
+            part.update("finetune", {sc: stats})
+            print(f"{sc}: fine-tuned, final KL(base || replaced) {stats['final_kl']:.4f} ({stats['seconds']}s)",
+                  flush=True)
+            del students
+            torch.cuda.empty_cache()
+        torch.backends.cuda.matmul.allow_tf32 = tf32
 
     if not ({"ppl", "recall", "consistency"} & set(args.stages)) and "bench" not in args.stages:
         return

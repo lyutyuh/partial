@@ -198,6 +198,43 @@ def test_recall_counts_chunk_invariant_and_match_dense():
     torch.testing.assert_close(big[f"win_hit@{N}"], big["queries"])
 
 
+@pytest.mark.parametrize("scorer", ["order1", "omix4", "rope128s"])
+def test_finetune_reduces_output_kl_and_freezes_base(scorer):
+    """End-to-end fine-tuning lowers KL(base || replaced) and only moves the students' parameters."""
+    model = _model()
+    for prm in model.parameters():
+        prm.requires_grad_(False)
+    before = {k: v.clone() for k, v in model.state_dict().items()}
+    students = {l: _student(scorer, seed=l) for l in (1, 2)}
+    tokens = torch.randint(0, 101, (4000,), generator=torch.Generator().manual_seed(9))
+    impl = "triton" if DEVICE == "cuda" else "torch"
+    stats = longctx.finetune_students(model, students, [1, 2], tokens, steps=40, t_ft=48, lr=3e-3, seed=0,
+                                      warmup=4, impl=impl, logit_chunk=16, log_every=10, log=lambda *a, **k: None)
+    first, last = stats["curve"][0][1], stats["curve"][-1][1]
+    assert last < first, stats["curve"]
+    for k, v in model.state_dict().items():
+        torch.testing.assert_close(v, before[k], rtol=0, atol=0)
+    assert all(not st.training for st in students.values())
+
+
+def test_finetune_loss_matches_full_vocab_kl():
+    """The chunked lm_head loss equals the KL over the whole sequence computed in one piece."""
+    model = _model()
+    for prm in model.parameters():
+        prm.requires_grad_(False)
+    students = {l: _student("order1", seed=l) for l in (1, 2)}
+    ids = torch.randint(0, 101, (1, 40), generator=torch.Generator().manual_seed(3)).to(DEVICE)
+    with torch.no_grad():
+        lt = torch.log_softmax(model(input_ids=ids).logits[:, :-1].float(), -1)
+        with longctx.replaced(model, students, [1, 2], impl="torch"):
+            ls = torch.log_softmax(model(input_ids=ids).logits[:, :-1].float(), -1)
+    ref = (lt.exp() * (lt - ls)).sum(-1).mean().item()
+    tokens = ids[0].cpu()
+    stats = longctx.finetune_students(model, students, [1, 2], tokens, steps=1, t_ft=40, lr=0.0, seed=0, warmup=1,
+                                      impl="torch", logit_chunk=7, log_every=1, log=lambda *a, **k: None)
+    assert abs(stats["curve"][0][1] - ref) < 1e-5
+
+
 def test_training_reduces_kl():
     model = _model()
     tokens = torch.randint(0, 101, (2000,), generator=torch.Generator().manual_seed(7))
