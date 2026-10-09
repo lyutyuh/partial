@@ -814,7 +814,7 @@ def main():
         # TF32 matmuls for the fine-tuning forwards/backwards only (two 16k-token fp32 forwards and the 152k-vocab
         # lm_head dominate a step); evaluation below restores full fp32
         tf32 = torch.backends.cuda.matmul.allow_tf32
-        torch.backends.cuda.matmul.allow_tf32 = args.ft_tf32
+        torch.backends.cuda.matmul.allow_tf32 = bool(args.ft_tf32)
         train_tokens = load_stream(tokenizer, "train", args.ft_train_chars)
         print(f"fine-tuning {args.scorers} (layers {REPLACED}) from {src} on {train_tokens.shape[0]} train tokens, "
               f"{args.ft_steps} steps x {args.ft_len} tokens, lr {args.ft_lr}, impl {args.impl}", flush=True)
