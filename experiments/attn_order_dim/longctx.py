@@ -399,8 +399,13 @@ def recall_counts(q, k, scale, student, out, ks, q_chunk=512):
     keys = torch.arange(N, device=dev)
     zeros = lambda: torch.zeros(H, device=dev, dtype=torch.float64)  # noqa: E731
     c = {"queries": zeros(), "nonsink": zeros(), "kl": zeros(), "sink_mass": zeros()}
+    # Besides the student's hits: a learning-free window baseline (the sink, then keys by recency) and a union
+    # indexer (student top k//2 plus window top k - k//2), all also restricted to non-trivial queries (more than k
+    # visible keys, where a hit is not automatic).
     for kk in ks:
-        c[f"hit@{kk}"], c[f"nonsink_hit@{kk}"] = zeros(), zeros()
+        for name in ("hit", "nonsink_hit", "win_hit", "nonsink_win_hit", "union_hit", "nonsink_union_hit",
+                     "nt_nonsink", "nt_nonsink_hit", "nt_nonsink_win_hit", "nt_nonsink_union_hit"):
+            c[f"{name}@{kk}"] = zeros()
     comps = components(out) if student.M else None
     for x0 in range(0, N, q_chunk):
         x1 = min(N, x0 + q_chunk)
@@ -414,14 +419,22 @@ def recall_counts(q, k, scale, student, out, ks, q_chunk=512):
             raise ValueError("recall is implemented for single-component order students (order1)")
         y = lt.argmax(-1, keepdim=True)  # teacher top key
         rank = (s > s.gather(-1, y)).sum(-1)  # (B, H, qc): keys the student scores strictly above it
+        yy = y[..., 0]
+        wrank = torch.where(yy == 0, 0, xs[None, None] - yy + 1)  # window order: sink, x, x-1, ...
         valid = (xs >= 1).to(torch.float64)[None, None]
-        ns = (y[..., 0] != 0).to(torch.float64) * valid
+        ns = (yy != 0).to(torch.float64) * valid
         c["queries"] += valid.expand_as(ns).sum((0, 2))
         c["nonsink"] += ns.sum((0, 2))
         for kk in ks:
             hit = (rank < kk).to(torch.float64)
-            c[f"hit@{kk}"] += (hit * valid).sum((0, 2))
-            c[f"nonsink_hit@{kk}"] += (hit * ns).sum((0, 2))
+            win = (wrank < kk).to(torch.float64)
+            union = ((rank < kk // 2) | (wrank < kk - kk // 2)).to(torch.float64)
+            nt = ns * (xs + 1 > kk).to(torch.float64)[None, None]  # more than kk visible keys
+            for name, h in (("hit", hit), ("win_hit", win), ("union_hit", union)):
+                c[f"{name}@{kk}"] += (h * valid).sum((0, 2))
+                c[f"nonsink_{name}@{kk}"] += (h * ns).sum((0, 2))
+                c[f"nt_nonsink_{name}@{kk}"] += (h * nt).sum((0, 2))
+            c[f"nt_nonsink@{kk}"] += nt.sum((0, 2))
         lpt, lps = torch.log_softmax(lt, -1), torch.log_softmax(s, -1)
         pt = lpt.exp()
         kl = torch.where(vis, pt * (lpt - lps), 0.0).sum(-1)
@@ -462,11 +475,24 @@ def recall_eval(model, students, layers, tokens, N, max_windows, ks, q_chunk=512
                "kl": (c["kl"] / c["queries"]).mean().item(),
                "sink_mass": (c["sink_mass"] / c["queries"]).mean().item(), "seconds": round(time.time() - t0, 1),
                "per_head": {}}
+        row["nonsink_queries"] = int(c["nonsink"].sum().item())
         for kk in ks:
+            # head means (the original metric) and pooled fractions (hits over all queries of all heads)
             row[f"recall@{kk}"] = (c[f"hit@{kk}"] / c["queries"]).mean().item()
             row[f"nonsink_recall@{kk}"] = (c[f"nonsink_hit@{kk}"] / c["nonsink"].clamp(min=1)).mean().item()
+            for name in ("hit", "win_hit", "union_hit"):
+                tag = {"hit": "", "win_hit": "window_", "union_hit": "union_"}[name]
+                row[f"pooled_{tag}recall@{kk}"] = (c[f"{name}@{kk}"].sum() / c["queries"].sum()).item()
+                row[f"pooled_{tag}nonsink_recall@{kk}"] = (c[f"nonsink_{name}@{kk}"].sum()
+                                                           / c["nonsink"].sum().clamp(min=1)).item()
+                row[f"pooled_{tag}nt_nonsink_recall@{kk}"] = (c[f"nt_nonsink_{name}@{kk}"].sum()
+                                                              / c[f"nt_nonsink@{kk}"].sum().clamp(min=1)).item()
+            row[f"nt_nonsink_queries@{kk}"] = int(c[f"nt_nonsink@{kk}"].sum().item())
             row["per_head"][f"recall@{kk}"] = (c[f"hit@{kk}"] / c["queries"]).tolist()
             row["per_head"][f"nonsink_recall@{kk}"] = (c[f"nonsink_hit@{kk}"] / c["nonsink"].clamp(min=1)).tolist()
+            row["per_head"][f"window_nonsink_recall@{kk}"] = (c[f"nonsink_win_hit@{kk}"]
+                                                              / c["nonsink"].clamp(min=1)).tolist()
+        row["per_head"]["nonsink"] = c["nonsink"].tolist()
         row["per_head"]["kl"] = (c["kl"] / c["queries"]).tolist()
         rows.append(row)
     return rows
@@ -603,6 +629,21 @@ def print_tables(res):
             for l in sorted({r["layer"] for r in rows}):
                 vals = {r["N"]: r[metric] for r in rows if r["layer"] == l}
                 print(f"{l:<6d} " + " ".join(f"{vals[n]:8.4f}" if n in vals else f"{'-':>8s}" for n in Ns))
+        for kk in (8, 64):
+            if f"pooled_nt_nonsink_recall@{kk}" not in rows[0]:
+                continue
+            print(f"pooled non-trivial non-sink recall@{kk} (queries whose teacher top key is not the sink and that see "
+                  f"more than {kk} keys): order1 student / window baseline (sink + {kk - 1} most recent) / union "
+                  f"(student top {kk // 2} + window top {kk - kk // 2})")
+            print(f"{'layer':6s} " + " ".join(f"{n:>26d}" for n in Ns))
+            for l in sorted({r["layer"] for r in rows}):
+                cell = {}
+                for r in rows:
+                    if r["layer"] == l:
+                        cell[r["N"]] = (f"{r[f'pooled_nt_nonsink_recall@{kk}']:.3f} / "
+                                        f"{r[f'pooled_window_nt_nonsink_recall@{kk}']:.3f} / "
+                                        f"{r[f'pooled_union_nt_nonsink_recall@{kk}']:.3f}")
+                print(f"{l:<6d} " + " ".join(f"{cell[n]:>26s}" if n in cell else f"{'-':>26s}" for n in Ns))
     for r in res.get("consistency", []):
         print(f"consistency {_label(r)}: max |logit diff| {r['max_abs_logit_diff']:.2e} "
               f"(max |logit| {r['max_abs_logit']:.1f}), NLL {r['nll_fast']:.5f} vs {r['nll_dense']:.5f}")
@@ -734,9 +775,13 @@ def main():
             rows = recall_eval(model, avail["order1"], args.student_layers, test, N, w, args.recall_ks, args.q_chunk)
             for row in rows:
                 part.add("recall", {"scorer": "order1", **row})
-                print(f"recall N={N:6d} layer {row['layer']:2d} ({row['windows']} windows): r@8 {row['recall@8']:.4f} "
-                      f"r@64 {row['recall@64']:.4f} r@256 {row['recall@256']:.4f} nonsink r@64 "
-                      f"{row['nonsink_recall@64']:.4f} KL {row['kl']:.3f} ({row['seconds']}s)", flush=True)
+                extra = "".join(f" | nt-nonsink@{kk} student {row[f'pooled_nt_nonsink_recall@{kk}']:.4f} window "
+                                f"{row[f'pooled_window_nt_nonsink_recall@{kk}']:.4f} union "
+                                f"{row[f'pooled_union_nt_nonsink_recall@{kk}']:.4f}"
+                                for kk in (8, 64) if kk in args.recall_ks)
+                print(f"recall N={N:6d} layer {row['layer']:2d} ({row['windows']} windows): r@64 {row['recall@64']:.4f} "
+                      f"nonsink r@64 {row['nonsink_recall@64']:.4f} KL {row['kl']:.3f}{extra} ({row['seconds']}s)",
+                      flush=True)
             torch.cuda.empty_cache()
 
     if "bench" in args.stages:

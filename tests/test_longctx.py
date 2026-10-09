@@ -176,9 +176,26 @@ def test_recall_counts_chunk_invariant_and_match_dense():
     y = (q @ k.transpose(-1, -2) * scale).masked_fill(~causal, float("-inf"))[0, :, 1:].argmax(-1, keepdim=True)
     rank = (lq > lq.gather(-1, y)).sum(-1)
     assert full["queries"][0].item() == N - 1
+    xs = torch.arange(1, N, device=DEVICE)
+    yy = y[..., 0]
+    wrank = torch.where(yy == 0, 0, xs - yy + 1)  # sink first, then x, x-1, ...
+    ns = yy != 0
     for kk in ks:
         torch.testing.assert_close(full[f"hit@{kk}"], (rank < kk).sum(-1).double())
-        torch.testing.assert_close(full[f"nonsink_hit@{kk}"], ((rank < kk) & (y[..., 0] != 0)).sum(-1).double())
+        torch.testing.assert_close(full[f"nonsink_hit@{kk}"], ((rank < kk) & ns).sum(-1).double())
+        # learning-free window baseline: hit iff the top key is the sink or among the kk - 1 most recent keys
+        win = (yy == 0) | (yy >= xs - kk + 2)
+        torch.testing.assert_close(full[f"win_hit@{kk}"], win.sum(-1).double())
+        torch.testing.assert_close(full[f"nonsink_win_hit@{kk}"], (win & ns).sum(-1).double())
+        union = (rank < kk // 2) | (wrank < kk - kk // 2)
+        torch.testing.assert_close(full[f"nonsink_union_hit@{kk}"], (union & ns).sum(-1).double())
+        nt = ns & (xs + 1 > kk)
+        torch.testing.assert_close(full[f"nt_nonsink@{kk}"], nt.sum(-1).double())
+        torch.testing.assert_close(full[f"nt_nonsink_hit@{kk}"], ((rank < kk) & nt).sum(-1).double())
+        torch.testing.assert_close(full[f"nt_nonsink_win_hit@{kk}"], (win & nt).sum(-1).double())
+    # the window baseline at kk = N covers every visible key
+    big = longctx.recall_counts(q, k, scale, st, out, (N,), q_chunk=N)
+    torch.testing.assert_close(big[f"win_hit@{N}"], big["queries"])
 
 
 def test_training_reduces_kl():
