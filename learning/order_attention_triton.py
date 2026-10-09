@@ -40,6 +40,9 @@ Kernels (one forward = ceil(log2 nc) segmented ``torch.sort`` calls + 3 Triton l
    prefix state at slot r - 1 shifted by -f1(x) and the suffix state at slot r shifted by -f2(x) are combined online
    into per-branch register accumulators; then the intra tile and the sink exp(b(x)) [v(0), 1].
 
+Every kernel runs b * H + h on grid axis 0 (folded with the query / key block, or the level block of the scans), so
+B H may exceed 65535, CUDA's cap on grid axes 1 and 2.
+
 Cost O(N C d) intra + O(N d log(N / C)) inter. The level buffers are transient (freed after the forward). Layout, from
 ``_build_levels``: one flat row space, level-major, rows ordered (level l, bh, block k, sorted slot) and level l
 starting at row lvl[l] = BH sum_{l' < l} nb_l' Lb_l' (computed inside the kernels, so no offset table is copied or
@@ -63,6 +66,13 @@ Saved for the backward (all fp32, contiguous, returned by ``_order_attention_fwd
 * ``lerr`` (B, H, N): the rounding residual of lse = m + log z (TwoSum), so that lse + lerr is m + log z exactly.
 
 Branch 2 follows as A2 = 1 - A1 - p0, U2 = out - U1 - p0 v(0). Query 0 sees only the sink: out(0) = v(0), p0(0) = 1.
+
+Extreme inputs. -1e30 (``NEG``) is the kernels' finite stand-in for -inf, and finite sink logits below it count as
+NEG: with b = finfo(float32).min (a masked sink) query 0 still gets out(0) = v(0), p0(0) = 1 (its saved lse is NEG
+instead of b(0)); another row is unchanged unless all its logits are <= NEG, which is not supported (it then gets about
+v(0)). b(0) = -inf leaves query 0 no finite logit and gives NaN, as in the torch references. A query masked by
+f_k = +inf (all its branch-k logits -inf) is supported in the forward and the backward. NaN inputs propagate. The
+backward is first order only: it raises under ``create_graph=True``.
 
 Backward (``_order_attention_bwd``). With dO the upstream gradient, D(x) = <dO(x), out(x)> and ds(x, y) =
 p(x, y) (<dO(x), v(y)> - D(x)) (the softmax backward):
@@ -117,6 +127,7 @@ including the weighted sum), i.e. even with cuDNN bf16 SDPA at N = 32768 (34.2 m
 No-grad forward 4.0 / 16.2 ms at N = 8192 / 32768 (autograd version 4.2 / 17.0 ms) at the same peak memory.
 """
 import contextlib
+import functools
 import math
 import os
 
@@ -153,6 +164,16 @@ def _level_row(lev, BH, nc, NLEV, C: tl.constexpr):
         nb_l = ((nc - (1 << li) - 1) >> (li + 1)) + 1
         off += tl.where(li < lev, nb_l << li, 0).to(tl.int64)
     return off * BH * C
+
+
+@triton.jit
+def _split_pid(n, BLK: tl.constexpr):
+    """(block, bh) of a program whose grid axis 0 runs over bh cdiv(n, BLK) + block (block fastest, the order of a
+    (blocks, B H) grid). B H is folded into axis 0 because CUDA caps grid axes 1 and 2 at 65535 programs."""
+    pid = tl.program_id(0)
+    nblk = tl.cdiv(n, BLK)
+    bh = pid // nblk
+    return pid - bh * nblk, bh
 
 
 @triton.jit
@@ -263,15 +284,14 @@ def _scan_kernel(perm_ptr, g_ptr, v_ptr, S1_ptr, mz1_ptr, S2_ptr, mz2_ptr,
 
 
 @triton.jit
-def _search_kernel(f_ptr, rank_ptr, r_ptr, N, nc, NLEV,
+def _search_kernel(f_ptr, rank_ptr, r_ptr, N, BH, nc, NLEV,
                    C: tl.constexpr, LOG2C: tl.constexpr, BQ: tl.constexpr, NL: tl.constexpr):
     """r[bh, l, x] = #keys with rank <= a(x) in the level-l block read by query x (0 where bit l of x's chunk is 0).
 
     A branchless binary search (binary lifting) over a (BQ, NL) tile of (query, level) pairs: LOG2C + NLEV dependent
     loads, whose steps sum to 2^(LOG2C + NLEV) - 1 >= every block size.
     """
-    qb = tl.program_id(0)
-    bh = tl.program_id(1)
+    qb, bh = _split_pid(N, BQ)
     seq = bh.to(tl.int64) * N
     q = qb * BQ + tl.arange(0, BQ)
     qmask = q < N
@@ -282,7 +302,7 @@ def _search_kernel(f_ptr, rank_ptr, r_ptr, N, nc, NLEV,
     has = (((c[:, None] >> lv[None, :]) & 1) == 1) & (lv < NLEV)[None, :] & qmask[:, None]
     Lb = C << lv
     nb = ((nc - (1 << lv) - 1) >> (lv + 1)) + 1  # garbage (unused) for lv >= NLEV
-    row0 = (_level_row(lv, tl.num_programs(1), nc, NLEV, C)[None, :]
+    row0 = (_level_row(lv, BH, nc, NLEV, C)[None, :]
             + (bh.to(tl.int64) * nb[None, :] + (c[:, None] >> (lv[None, :] + 1))) * Lb[None, :])
     r = tl.zeros((BQ, NL), tl.int32)
     step = 1 << (LOG2C + NLEV - 1)
@@ -299,13 +319,12 @@ def _search_kernel(f_ptr, rank_ptr, r_ptr, N, nc, NLEV,
 @triton.jit
 def _query_kernel(f_ptr, g_ptr, b_ptr, v_ptr, r_ptr, S1_ptr, mz1_ptr, S2_ptr, mz2_ptr,
                   out_ptr, lse_ptr, lerr_ptr, A1_ptr, U1_ptr, p0_ptr,
-                  N, nc, NLEV,
+                  N, BH, nc, NLEV,
                   C: tl.constexpr, D: tl.constexpr, BD: tl.constexpr, BQ: tl.constexpr, BK: tl.constexpr):
     """Output, lse (and its rounding residual), A1, U1 and p0 of BQ queries (one chunk) for one d-slice: tree states,
     intra tile, sink."""
-    qb = tl.program_id(0)
-    bh = tl.program_id(1)
-    dsl = tl.program_id(2)
+    qb, bh = _split_pid(N, BQ)
+    dsl = tl.program_id(1)
     seq = bh.to(tl.int64) * N
     q = qb * BQ + tl.arange(0, BQ)
     qmask = q < N
@@ -352,7 +371,7 @@ def _query_kernel(f_ptr, g_ptr, b_ptr, v_ptr, r_ptr, S1_ptr, mz1_ptr, S2_ptr, mz
             z1 = z1 * sa + w1 * s1
             z2 = z2 * sa + w2 * s2
             m_acc = m_new
-        lrow += (nb * Lb).to(tl.int64) * tl.num_programs(1)
+        lrow += (nb * Lb).to(tl.int64) * BH
 
     # ---- intra: keys c C .. x of the own chunk, dense. The row max over the whole chunk first (no exp, no V), then
     # P @ V over the key sub-tiles up to the block's last query only (causal skipping).
@@ -388,8 +407,12 @@ def _query_kernel(f_ptr, g_ptr, b_ptr, v_ptr, r_ptr, S1_ptr, mz1_ptr, S2_ptr, mz
         z1 += tl.sum(P1, axis=1)
         z2 += tl.sum(P2, axis=1)
 
-    # ---- sink: logit b(x), value v(0)
+    # ---- sink: logit b(x), value v(0). A finite b below NEG (e.g. finfo.min) is raised to NEG: query 0, which has
+    # no keys, got m_new = NEG, s0 = exp(b - NEG) = 0, z = 0 and a NaN output; raised, it gets s0 = 1, out = v(0),
+    # p0 = 1, as the torch references. Other rows are unchanged unless all their logits are <= NEG (exp(NEG - m) is
+    # exactly 0 for m > NEG + 104). -inf and NaN are kept: query 0 then gives NaN, as the references.
     bq = tl.load(b_ptr + seq + q, mask=qmask, other=0.0)
+    bq = tl.where((bq < _NEG) & (bq > float("-inf")), _NEG, bq)
     m_new = tl.maximum(m_acc, bq)
     sa = tl.exp(m_acc - m_new)
     s0 = tl.exp(bq - m_new)
@@ -431,8 +454,7 @@ def _bwd_prep_kernel(do_ptr, out_ptr, U1_ptr, v_ptr, A1_ptr, p0_ptr, dd_ptr, df_
     scan and intra kernels, which read it in place of the lse residual lerr, so that every probability they recompute,
     exp(logit - lse - lerrw), is w p (for w = 0: lerrw = +inf, so exactly 0).
     """
-    qb = tl.program_id(0)
-    bh = tl.program_id(1)
+    qb, bh = _split_pid(N, BQ)
     seq = bh.to(tl.int64) * N
     q = qb * BQ + tl.arange(0, BQ)
     qmask = q < N
@@ -443,7 +465,7 @@ def _bwd_prep_kernel(do_ptr, out_ptr, U1_ptr, v_ptr, A1_ptr, p0_ptr, dd_ptr, df_
         p0w = p0 * wq
     else:
         p0w = p0
-    prow = (bh.to(tl.int64) * tl.num_programs(0) + qb) * D
+    prow = tl.program_id(0).to(tl.int64) * D  # row bh cdiv(N, BQ) + qb of the (B H, cdiv(N, BQ), D) parts
     dD = tl.zeros((BQ,), tl.float32)
     dU = tl.zeros((BQ,), tl.float32)
     dv0 = tl.zeros((BQ,), tl.float32)
@@ -552,12 +574,17 @@ def _bwd_scan_kernel(perm_ptr, f_ptr, lse_ptr, lerr_ptr, do_ptr, dd_ptr, S1_ptr,
         hi = nf + nl  # lw = hi + lo exactly (TwoSum), minus the lse residual
         bv = hi - nf
         lo = ((nf - (hi - bv)) + (nl - bv)) - tl.load(lerr_ptr + seq + pos, mask=valid, other=0.0)
-        gm = tl.where(valid, hi, _NEG)
+        # A query with f = +inf on this branch (masked: its branch-k logits are -inf) has weight 0. Its TwoSum would be
+        # bv = (-inf) - (-inf) = NaN, and a NaN weight poisons every state of the block that includes it. (hi <= NEG
+        # had weight exp(hi - R) = 0 anyway, as R >= NEG; a NaN hi, from a NaN f, still propagates.)
+        ok = valid & ~(hi <= _NEG)
+        lo = tl.where(ok, lo, 0.0)
+        gm = tl.where(ok, hi, _NEG)
         inc, exc = tl.associative_scan((gm, tl.full((T,), _NEG, tl.float32)), 0, _max_incl_excl)
         R = tl.ceil(tl.maximum(inc, m_c))
         Rp = tl.ceil(tl.maximum(exc, m_c))
         a = tl.exp(Rp - R)
-        w = tl.where(valid, tl.exp((gm - R) + lo), 0.0)
+        w = tl.where(ok, tl.exp((gm - R) + lo), 0.0)
         v = tl.load(do_ptr + (seq + pos)[:, None] * D + cols[None, :], mask=valid[:, None] & cmask[None, :],
                     other=0.0)
         wd = w * tl.load(dd_ptr + seq + pos, mask=valid, other=0.0)
@@ -588,7 +615,7 @@ def _bwd_scan_kernel(perm_ptr, f_ptr, lse_ptr, lerr_ptr, do_ptr, dd_ptr, S1_ptr,
 
 
 @triton.jit
-def _bwd_search_kernel(g_ptr, rank_ptr, s_ptr, N, nc, NLEV,
+def _bwd_search_kernel(g_ptr, rank_ptr, s_ptr, N, BH, nc, NLEV,
                        C: tl.constexpr, LOG2C: tl.constexpr, BQ: tl.constexpr, NL: tl.constexpr):
     """s[bh, l, y] = #queries with a(x) < r(y) in the level-l query block read by key y (0 where it reads none).
 
@@ -596,8 +623,7 @@ def _bwd_search_kernel(g_ptr, rank_ptr, s_ptr, N, nc, NLEV,
     comparison is strict because the forward puts y on branch 1 of x iff r(y) <= a(x): slots >= s are y's branch-1
     queries, slots < s its branch-2 queries.
     """
-    yb = tl.program_id(0)
-    bh = tl.program_id(1)
+    yb, bh = _split_pid(N, BQ)
     seq = bh.to(tl.int64) * N
     y = yb * BQ + tl.arange(0, BQ)
     ymask = y < N
@@ -610,7 +636,7 @@ def _bwd_search_kernel(g_ptr, rank_ptr, s_ptr, N, nc, NLEV,
     has = ((((c[:, None] >> lv[None, :]) & 1) == 0) & (lv < NLEV)[None, :] & ymask[:, None]
            & (kq < nb[None, :]))
     Lb = C << lv
-    row0 = (_level_row(lv, tl.num_programs(1), nc, NLEV, C)[None, :]
+    row0 = (_level_row(lv, BH, nc, NLEV, C)[None, :]
             + (bh.to(tl.int64) * nb[None, :] + kq) * Lb[None, :])
     s = tl.zeros((BQ, NL), tl.int32)
     step = 1 << (LOG2C + NLEV - 1)
@@ -637,9 +663,8 @@ def _key_intra_kernel(f_ptr, g_ptr, lse_ptr, lerr_ptr, dd_ptr, do_ptr, v_ptr, dv
     in BD-wide steps and slice 0 writes dg. For a mixture component, lerr is the prep kernel's lerr - log w: P^T is
     then w P^T, which scales dS^T and P^T dO alike (the backward for the upstream gradient w dO).
     """
-    kb = tl.program_id(0)
-    bh = tl.program_id(1)
-    dsl = tl.program_id(2)
+    kb, bh = _split_pid(N, BK)
+    dsl = tl.program_id(1)
     seq = bh.to(tl.int64) * N
     y = kb * BK + tl.arange(0, BK)
     ymask = y < N
@@ -694,7 +719,7 @@ def _key_intra_kernel(f_ptr, g_ptr, lse_ptr, lerr_ptr, dd_ptr, do_ptr, v_ptr, dv
 
 
 @triton.jit
-def _key_tree_kernel(g_ptr, v_ptr, s_ptr, S1_ptr, mz1_ptr, S2_ptr, mz2_ptr, dv_ptr, dg_ptr, N, nc, NLEV,
+def _key_tree_kernel(g_ptr, v_ptr, s_ptr, S1_ptr, mz1_ptr, S2_ptr, mz2_ptr, dv_ptr, dg_ptr, N, BH, nc, NLEV,
                      C: tl.constexpr, D: tl.constexpr, BD: tl.constexpr, BK: tl.constexpr):
     """Adds the later chunks' share to dV (one d-slice) of BK keys of one chunk and writes their dg1 / dg2 parts.
 
@@ -704,10 +729,8 @@ def _key_tree_kernel(g_ptr, v_ptr, s_ptr, S1_ptr, mz1_ptr, S2_ptr, mz2_ptr, dv_p
     the state's largest query up to the whole-nat rounding of m (so <= ~1) and exact for the dominant terms (m is an
     integer). dg parts are per d-slice (the zD terms go to slice 0) and summed afterwards.
     """
-    kb = tl.program_id(0)
-    bh = tl.program_id(1)
-    dsl = tl.program_id(2)
-    BH = tl.num_programs(1)
+    kb, bh = _split_pid(N, BK)
+    dsl = tl.program_id(1)
     seq = bh.to(tl.int64) * N
     y = kb * BK + tl.arange(0, BK)
     ymask = y < N
@@ -923,9 +946,9 @@ def _fwd(f, g, b, V, chunk, timer, out=None):
     if timer:
         timer("search", True)
     if nlev:
-        _search_kernel[(triton.cdiv(N, SEARCH_Q), B * H)](f, rank, r, N, nc, nlev, C=chunk,
-                                                         LOG2C=int(math.log2(chunk)), BQ=SEARCH_Q,
-                                                         NL=max(2, triton.next_power_of_2(nlev)), num_warps=4)
+        _search_kernel[(triton.cdiv(N, SEARCH_Q) * B * H,)](f, rank, r, N, B * H, nc, nlev, C=chunk,
+                                                            LOG2C=int(math.log2(chunk)), BQ=SEARCH_Q,
+                                                            NL=max(2, triton.next_power_of_2(nlev)), num_warps=4)
     if timer:
         timer("search", False)
         timer("query", True)
@@ -937,8 +960,8 @@ def _fwd(f, g, b, V, chunk, timer, out=None):
     A1 = torch.empty_like(lse)
     p0 = torch.empty_like(lse)
     bd = min(BLOCK_D, max(16, triton.next_power_of_2(d)))  # tl.dot needs every dim >= 16
-    _query_kernel[(triton.cdiv(N, BLOCK_Q), B * H, triton.cdiv(d, bd))](
-        f, g, b, V, r, S1, mz1, S2, mz2, out, lse, lerr, A1, U1, p0, N, nc, nlev,
+    _query_kernel[(triton.cdiv(N, BLOCK_Q) * B * H, triton.cdiv(d, bd))](
+        f, g, b, V, r, S1, mz1, S2, mz2, out, lse, lerr, A1, U1, p0, N, B * H, nc, nlev,
         C=chunk, D=d, BD=bd, BQ=BLOCK_Q, BK=BLOCK_Q, num_warps=4)
     if timer:
         timer("query", False)
@@ -1036,10 +1059,10 @@ def _bwd_core(f, g, V, out, lse, A1, U1, p0, lerr, dO, chunk, dV, dv0, timer, ac
     df = torch.empty(B, H, N, 2, device=dev, dtype=torch.float32)
     db = torch.empty(B, H, N, device=dev, dtype=torch.float32)
     lerr_k = torch.empty_like(lerr) if has_w else lerr  # the residual the scan and intra kernels read
-    _bwd_prep_kernel[(triton.cdiv(N, PREP_Q), BH)](dO, out, U1, V, A1, p0, Dd, df, db, dv0,
-                                                   w if has_w else Dd, dw if has_w else Dd, lerr, lerr_k,
-                                                   N, w.shape[-1] if has_w else 1, mi, D=d, BD=min(64, dpow),
-                                                   BQ=PREP_Q, HAS_W=has_w, num_warps=4)
+    _bwd_prep_kernel[(triton.cdiv(N, PREP_Q) * BH,)](dO, out, U1, V, A1, p0, Dd, df, db, dv0,
+                                                     w if has_w else Dd, dw if has_w else Dd, lerr, lerr_k,
+                                                     N, w.shape[-1] if has_w else 1, mi, D=d, BD=min(64, dpow),
+                                                     BQ=PREP_Q, HAS_W=has_w, num_warps=4)
     if timer:
         timer("prep", False)
 
@@ -1048,9 +1071,9 @@ def _bwd_core(f, g, V, out, lse, A1, U1, p0, lerr, dO, chunk, dV, dv0, timer, ac
     if timer:
         timer("search", True)
     if nlev:
-        _bwd_search_kernel[(triton.cdiv(N, SEARCH_Q), BH)](g, rank, s, N, nc, nlev, C=chunk,
-                                                          LOG2C=int(math.log2(chunk)), BQ=SEARCH_Q,
-                                                          NL=max(2, triton.next_power_of_2(nlev)), num_warps=4)
+        _bwd_search_kernel[(triton.cdiv(N, SEARCH_Q) * BH,)](g, rank, s, N, BH, nc, nlev, C=chunk,
+                                                             LOG2C=int(math.log2(chunk)), BQ=SEARCH_Q,
+                                                             NL=max(2, triton.next_power_of_2(nlev)), num_warps=4)
     if timer:
         timer("search", False)
         timer("intra", True)
@@ -1059,19 +1082,39 @@ def _bwd_core(f, g, V, out, lse, A1, U1, p0, lerr, dO, chunk, dV, dv0, timer, ac
     dgp = torch.empty(1 + nds, B, H, N, 2, device=dev, dtype=torch.float32)  # [intra, tree d-slices...]
     ik = min(INTRA_K, chunk)
     ibd = dpow if dpow <= INTRA_FULL_D else INTRA_D
-    _key_intra_kernel[(triton.cdiv(N, ik), BH, triton.cdiv(d, ibd))](
+    _key_intra_kernel[(triton.cdiv(N, ik) * BH, triton.cdiv(d, ibd))](
         f, g, lse, lerr_k, Dd, dO, V, dV, dgp[0], N, C=chunk, D=d, BD=ibd, BK=ik, BQ=min(INTRA_Q, chunk), ACC=acc,
         num_warps=4, num_stages=1)
     if timer:
         timer("intra", False)
         timer("tree", True)
     if nlev:
-        _key_tree_kernel[(triton.cdiv(N, TREE_K), BH, nds)](g, V, s, S1, mz1, S2, mz2, dV, dgp[1:], N, nc, nlev,
-                                                           C=chunk, D=d, BD=bd, BK=TREE_K, num_warps=TREE_WARPS)
+        _key_tree_kernel[(triton.cdiv(N, TREE_K) * BH, nds)](g, V, s, S1, mz1, S2, mz2, dV, dgp[1:], N, BH, nc,
+                                                             nlev, C=chunk, D=d, BD=bd, BK=TREE_K, num_warps=TREE_WARPS)
     if timer:
         timer("tree", False)
     dg = dgp[0] if nds == 0 else dgp.sum(0)
     return df, dg, db
+
+
+def _first_order(backward):
+    """Marks an autograd backward that is not differentiable itself (a Triton kernel chain): it raises when called
+    under ``create_graph=True`` (inside a backward, grad mode is on exactly then).
+
+    ``torch.autograd.function.once_differentiable`` is not enough: it attaches its error node only when the upstream
+    gradient requires grad, so for a loss linear in the output (``out.sum()``, ``<c, out>``) the returned gradients
+    were plain tensors and a gradient penalty, ``functional.hvp`` or ``functional.hessian`` silently got no
+    second-order term (zeros); and ``autograd.grad`` with respect to the inputs prunes that node even when it is there.
+    """
+    @functools.wraps(backward)
+    def wrapper(ctx, *grads):
+        if torch.is_grad_enabled():
+            raise RuntimeError(
+                "order_attention_triton / mixture_attention_triton have no double backward (the backward is a Triton "
+                "kernel chain, not differentiable itself): differentiate without create_graph=True, or use the torch "
+                "learning.order_attention.order_attention / mixture_attention for higher-order gradients")
+        return backward(ctx, *grads)  # grad mode is off: nothing is recorded
+    return wrapper
 
 
 class _OrderAttention(torch.autograd.Function):
@@ -1085,7 +1128,7 @@ class _OrderAttention(torch.autograd.Function):
         return saved[0]
 
     @staticmethod
-    @torch.autograd.function.once_differentiable  # the Triton backward is not differentiable itself
+    @_first_order
     def backward(ctx, gout):
         f, g, b, V, *saved = ctx.saved_tensors
         df, dg, db, dV = _order_attention_bwd(f, g, b, V, *saved, gout, ctx.chunk)
@@ -1168,7 +1211,7 @@ class _MixtureAttention(torch.autograd.Function):
         return out
 
     @staticmethod
-    @torch.autograd.function.once_differentiable  # the Triton backward is not differentiable itself
+    @_first_order
     def backward(ctx, gout):
         M, chunk = ctx.M, ctx.chunk
         V, w, O, *rest = ctx.saved_tensors
