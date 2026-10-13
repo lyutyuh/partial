@@ -44,6 +44,13 @@ of ``learning/order_attention``):
         S2 = shift(prefix(T2, B - 1 - cut), -f2(x))                               # cells > cut
         out(x) = normalise(combine(S1, S2, (b(x), [v(0), 1])))
 
+    training (``quantised_order_attn_func``, all queries of a sequence at once, with gradients):
+        branch keys rank(y) = cell(r(y)), threshold(x) = cell(a(x)) are passed to the exact prefill kernels of
+        ``learning/order_attention_triton`` (chunked position tree, sorted by the cell index instead of the rank),
+        whose forward and backward then score the quantised model: d(out)/d(f, g, b, v) flow through the logits of the
+        selected branches exactly as in the exact model, the cells carry no gradient. The decode cache above reproduces
+        this forward token by token.
+
 Against the exact decode cache (``OrderCache``: rank-sorted blocks of sizes 2^l, a binary search per block, O(N d)
 memory) the quantised cache replaces the sort by cell indexing and the per-block searches by fixed-length index
 chains: 4 chains of <= log2(B) + 1 combines per token, 2 (B + 2)(d + 2) floats per head whatever N.
@@ -443,6 +450,43 @@ if triton is not None:
         m, S = _fenwick_combine(m, S, tl.load(Bsink + h + one), v0)
         denom = tl.sum(tl.where(cols == WIDTH - 2, S, 0.0), axis=0)
         tl.store(Out + h * (WIDTH - 2) + cols, S / denom, mask=cols < WIDTH - 2)
+
+
+# ------------------------------------------------------------------------------------------------------ training
+def _cells_batched(edges: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
+    """Cell indices of (batch, num_heads, seq_len) values as fp32 (edges shared or per head)."""
+    if edges.dim() == 1:
+        return rank_cells(edges, values).float()
+    batch, num_heads, seq_len = values.shape
+    cells = rank_cells(edges, values.transpose(0, 1).reshape(num_heads, batch * seq_len))
+    return cells.reshape(num_heads, batch, seq_len).transpose(0, 1).float()
+
+
+def quantised_order_attn_func(
+    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, v: torch.Tensor, edges: torch.Tensor, chunk: int = 64
+) -> torch.Tensor:
+    """Causal order attention of the quantised model, for training: the Triton forward and backward of
+    ``order_attn_func`` with the branch keys replaced by the cell indices of ranks and thresholds, so that a model
+    trained with it decodes EXACTLY through ``OrderFenwickCache`` with the same edges. Differentiable in f, g, b and
+    v; the cells are piecewise constant and carry no gradient (as the branch decision of the exact model).
+
+    Arguments:
+        f: (batch, nheads, seqlen, 2) query realizers.
+        g: (batch, nheads, seqlen, 2) key realizers (position 0 is the sink key).
+        b: (batch, nheads, seqlen) sink logits.
+        v: (batch, nheads, seqlen, headdim) values.
+        edges: (B - 1,) shared or (nheads, B - 1) per-head cell edges, as in ``OrderFenwickCache``.
+        chunk: see ``order_attn_func``.
+    Return:
+        (batch, nheads, seqlen, headdim) fp32 attention output.
+    """
+    from learning.order_attention_triton import order_attn_func
+
+    edges = edges.to(f.device).float()
+    with torch.no_grad():
+        krank = _cells_batched(edges, g[..., 0].float() - g[..., 1].float())
+        qthr = _cells_batched(edges, f[..., 0].float() - f[..., 1].float())
+    return order_attn_func(f, g, b, v, chunk, rank=krank, threshold=qthr)
 
 
 # ------------------------------------------------------------------------------------------------------ reference

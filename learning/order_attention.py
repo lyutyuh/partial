@@ -241,19 +241,33 @@ def order_attention(
 
 
 def eager_order_attention_forward(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, value: torch.Tensor, causal: bool = True
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    value: torch.Tensor,
+    causal: bool = True,
+    rank: Optional[torch.Tensor] = None,
+    threshold: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """O(N^2) reference in the style of ``eager_attention_forward``: explicit logits, mask, softmax @ value.
 
     Args:
         f, g, b, value: as in ``order_attention``.
         causal: mask keys y > x.
+        rank, threshold: optional (batch, num_heads, seq_len) branch keys replacing g1 - g2 and f1 - f2: y scores
+            g1(y) - f1(x) iff rank(y) <= threshold(x), else g2(y) - f2(x) (the min form when they are the defaults).
 
     Returns:
         attn_output (batch, num_heads, seq_len, head_dim) and attn_weights (batch, num_heads, seq_len, seq_len).
     """
     f, g, value = f.float(), g.float(), value.float()
-    scores = (g.unsqueeze(2) - f.unsqueeze(3)).amin(dim=-1)  # (batch, num_heads, x, y): min_k g_k(y) - f_k(x)
+    if rank is None and threshold is None:
+        scores = (g.unsqueeze(2) - f.unsqueeze(3)).amin(dim=-1)  # (batch, num_heads, x, y): min_k g_k(y) - f_k(x)
+    else:
+        rank = g[..., 0] - g[..., 1] if rank is None else rank.float()
+        threshold = f[..., 0] - f[..., 1] if threshold is None else threshold.float()
+        diff = g.unsqueeze(2) - f.unsqueeze(3)  # (batch, num_heads, x, y, 2)
+        scores = torch.where(rank.unsqueeze(2) <= threshold.unsqueeze(3), diff[..., 0], diff[..., 1])
     scores = torch.cat([b.float().unsqueeze(-1), scores[..., 1:]], dim=-1)
     if causal:
         seq_len = scores.shape[-1]

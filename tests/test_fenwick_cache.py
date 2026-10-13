@@ -12,7 +12,8 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from learning.fenwick_cache import (  # noqa: E402
-    OrderFenwickCache, bf16_edges, eager_quantised_order_attention_forward, quantile_edges, rank_cells, uniform_edges,
+    OrderFenwickCache, bf16_edges, eager_quantised_order_attention_forward, quantile_edges, quantised_order_attn_func,
+    rank_cells, uniform_edges,
 )
 from learning.order_attention import OrderCache, dense_order_attention  # noqa: E402
 
@@ -175,3 +176,30 @@ def test_triton_step_matches_torch(per_head, prefill, num_cells):
         torch.testing.assert_close(triton_cache.query(f[:, t], b[:, t]), c, rtol=1e-6, atol=1e-6)
     torch.testing.assert_close(triton_cache.tree1, torch_cache.tree1, rtol=1e-5, atol=1e-5)
     torch.testing.assert_close(triton_cache.tree2, torch_cache.tree2, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.skipif(DEVICE != "cuda", reason="Triton kernel")
+@pytest.mark.parametrize("per_head,N,chunk,num_cells", [(False, 9, 16, 4), (True, 130, 16, 16), (True, 300, 64, 3),
+                                                        (False, 1000, 64, 256)])
+def test_quantised_attn_forward_backward_and_decode(per_head, N, chunk, num_cells):
+    """Training-time quantised attention (Triton forward + backward with cell branch keys) matches the fp64 dense
+    quantised reference in value and gradients, and its outputs equal the Fenwick decode cache's, token by token."""
+    H, d = 3, 8
+    f, g, b, V = _inputs(N + chunk + num_cells, H, N, d)
+    edges = quantile_edges(g[..., 0] - g[..., 1], num_cells) if per_head else uniform_edges(-6.0, 6.0, num_cells).to(DEVICE)
+    leaves = [x.clone().requires_grad_() for x in (f, g, b, V)]
+    out = quantised_order_attn_func(*(x[None] for x in leaves), edges, chunk)[0]
+    ref_leaves = [x.clone().requires_grad_() for x in (f, g, b, V)]
+    ref = eager_quantised_order_attention_forward(*ref_leaves, edges)[0]
+    torch.testing.assert_close(out, ref.float(), rtol=1e-4, atol=1e-4)
+    dout = torch.randn_like(out)
+    grads = torch.autograd.grad((out * dout).sum(), leaves)
+    ref_grads = torch.autograd.grad((ref * dout.double()).sum(), ref_leaves)
+    for got, want in zip(grads, ref_grads):
+        torch.testing.assert_close(got, want.float(), rtol=1e-3, atol=1e-3)
+    cache = OrderFenwickCache(edges, impl="triton")
+    prefill = N // 2
+    cache.prefill(g[:, :prefill], V[:, :prefill])
+    for t in range(prefill, N):
+        step = cache.step(f[:, t], g[:, t], b[:, t], V[:, t])
+        torch.testing.assert_close(step, out[:, t].detach(), rtol=1e-4, atol=1e-4)

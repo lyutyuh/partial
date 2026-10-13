@@ -939,3 +939,46 @@ def test_many_heads():
     ref_in = [sub(t) for t in inputs]
     torch.testing.assert_close(sub(out_ng), _dense_mixture64(M)(*ref_in).float(), **TOL)
     _assert_grads([sub(x) for x in got], _grads(_dense_mixture64(M), ref_in, sub(dO)), names=_mix_names(M))
+
+
+def _dense_with_keys(f, g, b, v, rank, threshold):
+    """fp64 dense causal reference with explicit branch keys (sink at key 0)."""
+    f, g, b, v = f.double(), g.double(), b.double(), v.double()
+    diff = g.unsqueeze(2) - f.unsqueeze(3)
+    scores = torch.where(rank.double().unsqueeze(2) <= threshold.double().unsqueeze(3), diff[..., 0], diff[..., 1])
+    scores = torch.cat([b.unsqueeze(-1), scores[..., 1:]], dim=-1)
+    n = scores.shape[-1]
+    scores = scores.masked_fill(~torch.ones(n, n, dtype=torch.bool, device=scores.device).tril(), float("-inf"))
+    return torch.softmax(scores, dim=-1) @ v
+
+
+@pytest.mark.parametrize("N,chunk,codes", [(7, 16, False), (130, 16, True), (257, 64, True), (1000, 64, False)])
+def test_branch_keys_forward_and_backward(N, chunk, codes):
+    """Explicit branch keys (random reals, or integer codes far beyond fp32's resolution of g1 - g2): the forward and
+    the gradients in f, g, b, v match an fp64 dense reference, and the default keys reproduce the default call."""
+    B, H, d = 2, 3, 24
+    gen = torch.Generator().manual_seed(N * 3 + chunk)
+    f = (torch.randn(B, H, N, 2, generator=gen) * 2).to(DEVICE).requires_grad_()
+    g = (torch.randn(B, H, N, 2, generator=gen) * 2).to(DEVICE).requires_grad_()
+    b = (torch.randn(B, H, N, generator=gen) * 2).to(DEVICE).requires_grad_()
+    v = torch.randn(B, H, N, d, generator=gen).to(DEVICE).requires_grad_()
+    if codes:
+        rank = torch.randint(0, 1 << 24, (B, H, N), generator=gen).float().to(DEVICE)
+        threshold = torch.randint(0, 1 << 24, (B, H, N), generator=gen).float().to(DEVICE)
+    else:
+        rank = (torch.randn(B, H, N, generator=gen) * 3).to(DEVICE)
+        threshold = (torch.randn(B, H, N, generator=gen) * 3).to(DEVICE)
+    out = order_attn_func(f, g, b, v, chunk, rank=rank, threshold=threshold)
+    ref = _dense_with_keys(f, g, b, v, rank, threshold)
+    torch.testing.assert_close(out, ref.float(), rtol=1e-4, atol=1e-4)
+    dout = torch.randn(out.shape, generator=gen).to(DEVICE)
+    grads = torch.autograd.grad((out * dout).sum(), (f, g, b, v))
+    ref_grads = torch.autograd.grad((ref * dout.double()).sum(), (f, g, b, v))
+    for got, want in zip(grads, ref_grads):
+        torch.testing.assert_close(got, want.float(), rtol=1e-3, atol=1e-3)
+    with torch.no_grad():
+        default = order_attn_func(f, g, b, v, chunk)
+        explicit = order_attn_func(f, g, b, v, chunk, rank=g[..., 0] - g[..., 1], threshold=f[..., 0] - f[..., 1])
+    assert torch.equal(default, explicit)
+    with pytest.raises(ValueError):
+        order_attn_func(f, g, b, v, chunk, rank=rank[..., :-1])

@@ -10,7 +10,10 @@ Per (batch, head): query realizers f(x) = (f1, f2), key realizers g(y) = (g1, g2
 With query rank a(x) = f1(x) - f2(x) and key rank r(y) = g1(y) - g2(y), y is on branch 1 of x iff r(y) <= a(x) (logit
 g1(y) - f1(x)), else on branch 2 (logit g2(y) - f2(x)). The kernels decide every branch by this one fp32 comparison of
 the two ranks (also inside the dense tile), so the forward and a backward always agree on it; at a near-tie the two
-candidate logits differ only by rounding.
+candidate logits differ only by rounding. ``order_attn_func`` also takes explicit branch keys ``rank`` (keys) and
+``threshold`` (queries) in place of g1 - g2 and f1 - f2: the branch rule becomes rank(y) <= threshold(x) while the
+logits keep g and f. This is how the quantised (cell) model of ``learning/fenwick_cache`` is trained, and it lets a
+branch key be an integer code beyond fp32's 2^24 resolution of a difference of realizers.
 
 Layout: f, g (batch, nheads, seqlen, 2); b (batch, nheads, seqlen); v (batch, nheads, seqlen, headdim). Every kernel
 runs b * nheads + h on grid axis 0 (folded with the query / key block, or the level block of the scans), so
@@ -442,7 +445,7 @@ def _fwd_scan_kernel(
 
 @triton.jit
 def _fwd_search_kernel(
-    F,
+    A,
     Rank,
     Split,
     seqlen,
@@ -464,9 +467,7 @@ def _fwd_search_kernel(
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     mask_m = offs_m < seqlen
     chunk_idx = offs_m // CHUNK
-    qrank = tl.load(F + (off_seq + offs_m) * 2, mask=mask_m, other=0.0) - tl.load(
-        F + (off_seq + offs_m) * 2 + 1, mask=mask_m, other=0.0
-    )
+    qrank = tl.load(A + off_seq + offs_m, mask=mask_m, other=0.0)  # branch key a(x) of the queries
     levels = tl.arange(0, BLOCK_LEVELS)
     reads = (((chunk_idx[:, None] >> levels[None, :]) & 1) == 1) & (levels < nlevels)[None, :] & mask_m[:, None]
     block_len = CHUNK << levels
@@ -495,6 +496,8 @@ def _fwd_kernel(
     G,
     B,
     V,
+    R,
+    A,
     Split,
     S1,
     MZ1,
@@ -528,7 +531,7 @@ def _fwd_kernel(
     mask_d = offs_d < HEADDIM
     f1 = tl.load(F + (off_seq + offs_m) * 2, mask=mask_m, other=0.0)
     f2 = tl.load(F + (off_seq + offs_m) * 2 + 1, mask=mask_m, other=0.0)
-    qrank = f1 - f2
+    qrank = tl.load(A + off_seq + offs_m, mask=mask_m, other=0.0)  # branch key a(x)
 
     # online-softmax accumulators, one per branch, sharing the running max m_acc
     m_acc = tl.full((BLOCK_M,), _NEG, tl.float32)
@@ -578,7 +581,8 @@ def _fwd_kernel(
     mask_chunk = offs_chunk < seqlen
     g1_chunk = tl.load(G + (off_seq + offs_chunk) * 2, mask=mask_chunk, other=0.0)
     g2_chunk = tl.load(G + (off_seq + offs_chunk) * 2 + 1, mask=mask_chunk, other=0.0)
-    branch1_chunk = (g1_chunk - g2_chunk)[None, :] <= qrank[:, None]
+    r_chunk = tl.load(R + off_seq + offs_chunk, mask=mask_chunk, other=0.0)  # branch keys r(y)
+    branch1_chunk = r_chunk[None, :] <= qrank[:, None]
     logit_chunk = tl.where(branch1_chunk, g1_chunk[None, :] - f1[:, None], g2_chunk[None, :] - f2[:, None])
     visible_chunk = (offs_chunk[None, :] <= offs_m[:, None]) & (offs_chunk[None, :] >= 1) & mask_chunk[None, :]
     m_new = tl.maximum(m_acc, tl.max(tl.where(visible_chunk, logit_chunk, _NEG), axis=1))
@@ -593,7 +597,8 @@ def _fwd_kernel(
         mask_n = offs_n < seqlen
         g1_n = tl.load(G + (off_seq + offs_n) * 2, mask=mask_n, other=0.0)
         g2_n = tl.load(G + (off_seq + offs_n) * 2 + 1, mask=mask_n, other=0.0)
-        branch1 = (g1_n - g2_n)[None, :] <= qrank[:, None]
+        r_n = tl.load(R + off_seq + offs_n, mask=mask_n, other=0.0)
+        branch1 = r_n[None, :] <= qrank[:, None]
         logit = tl.where(branch1, g1_n[None, :] - f1[:, None], g2_n[None, :] - f2[:, None])
         visible = (offs_n[None, :] <= offs_m[:, None]) & (offs_n[None, :] >= 1) & mask_n[None, :]
         p = tl.where(visible, tl.exp(logit - m_acc[:, None]), 0.0)
@@ -837,7 +842,7 @@ def _bwd_scan_kernel(
 
 @triton.jit
 def _bwd_search_kernel(
-    G,
+    R,
     Rank,
     Split,
     seqlen,
@@ -860,9 +865,7 @@ def _bwd_search_kernel(
     offs_n = start_n * BLOCK_N + tl.arange(0, BLOCK_N)
     mask_n = offs_n < seqlen
     chunk_idx = offs_n // CHUNK
-    krank = tl.load(G + (off_seq + offs_n) * 2, mask=mask_n, other=0.0) - tl.load(
-        G + (off_seq + offs_n) * 2 + 1, mask=mask_n, other=0.0
-    )
+    krank = tl.load(R + off_seq + offs_n, mask=mask_n, other=0.0)  # branch keys r(y)
     levels = tl.arange(0, BLOCK_LEVELS)
     nblocks = _num_blocks(nchunks, levels)  # garbage (unused) for levels >= nlevels
     block_idx = chunk_idx[:, None] >> (levels[None, :] + 1)
@@ -893,6 +896,8 @@ def _bwd_search_kernel(
 def _bwd_intra_kernel(
     F,
     G,
+    R,
+    A,
     Lse,
     LseErr,
     Delta,
@@ -929,7 +934,7 @@ def _bwd_intra_kernel(
     mask_d = offs_d < HEADDIM
     g1_n = tl.load(G + (off_seq + offs_n) * 2, mask=mask_n, other=0.0)
     g2_n = tl.load(G + (off_seq + offs_n) * 2 + 1, mask=mask_n, other=0.0)
-    krank = g1_n - g2_n
+    krank = tl.load(R + off_seq + offs_n, mask=mask_n, other=0.0)  # branch keys r(y)
     v_n = tl.load(
         V + (off_seq + offs_n)[:, None] * HEADDIM + offs_d[None, :], mask=mask_n[:, None] & mask_d[None, :], other=0.0
     ).to(tl.float32)
@@ -946,7 +951,8 @@ def _bwd_intra_kernel(
         lse_m = tl.load(Lse + off_seq + offs_m, mask=mask_m, other=0.0)
         lse_err_m = tl.load(LseErr + off_seq + offs_m, mask=mask_m, other=0.0)
         delta_m = tl.load(Delta + off_seq + offs_m, mask=mask_m, other=0.0)
-        branch1 = krank[:, None] <= (f1_m - f2_m)[None, :]  # (BLOCK_N, BLOCK_M)
+        a_m = tl.load(A + off_seq + offs_m, mask=mask_m, other=0.0)  # branch keys a(x)
+        branch1 = krank[:, None] <= a_m[None, :]  # (BLOCK_N, BLOCK_M)
         logit = tl.where(branch1, g1_n[:, None] - f1_m[None, :], g2_n[:, None] - f2_m[None, :])
         visible = (offs_n[:, None] <= offs_m[None, :]) & mask_key[:, None] & mask_m[None, :]
         p_t = tl.where(visible, tl.exp((logit - lse_m[None, :]) - lse_err_m[None, :]), 0.0)
@@ -1142,7 +1148,28 @@ def _empty_level_states(
     return rank, S1, mz1, S2, mz2
 
 
-def _check_inputs(f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, v: torch.Tensor, chunk: int) -> None:
+def _branch_keys(
+    f: torch.Tensor, g: torch.Tensor, krank: Optional[torch.Tensor], qthr: Optional[torch.Tensor]
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Contiguous fp32 branch keys: the given ones, or g1 - g2 / f1 - f2 (f, g fp32 contiguous: the same fp32
+    subtraction the kernels used to do inline, so the default path is unchanged)."""
+    krank = (g[..., 0] - g[..., 1]) if krank is None else krank.float().contiguous()
+    qthr = (f[..., 0] - f[..., 1]) if qthr is None else qthr.float().contiguous()
+    return krank.contiguous(), qthr.contiguous()
+
+
+def _check_inputs(
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    v: torch.Tensor,
+    chunk: int,
+    krank: Optional[torch.Tensor] = None,
+    qthr: Optional[torch.Tensor] = None,
+) -> None:
+    for name, key in (("rank", krank), ("threshold", qthr)):
+        if key is not None and key.shape != f.shape[:-1]:
+            raise ValueError(f"expected {name} of shape (batch, nheads, seqlen) = {tuple(f.shape[:-1])}, got {tuple(key.shape)}")
     if f.dim() != 4 or f.shape[-1] != 2 or g.shape != f.shape:
         raise ValueError(
             f"expected f, g of shape (batch, nheads, seqlen, 2), got {tuple(f.shape)} and {tuple(g.shape)}"
@@ -1180,7 +1207,7 @@ def _on_device(t: torch.Tensor):
 
 
 def _fwd_build_levels(
-    g: torch.Tensor, v: torch.Tensor, chunk: int, timer: Timer = None
+    g: torch.Tensor, v: torch.Tensor, chunk: int, timer: Timer = None, krank: Optional[torch.Tensor] = None
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """Sort every level block by rank and scan it into prefix / suffix states.
 
@@ -1193,6 +1220,7 @@ def _fwd_build_levels(
         v: (batch, nheads, seqlen, headdim) values, from ``_as_kernel_values``.
         chunk: keys per chunk.
         timer: called around the "sort" and "scan" phases.
+        krank: (batch, nheads, seqlen) fp32 branch keys of the keys (default g1 - g2).
     Return:
         rank: (rows,) fp32 sorted key ranks.
         S1, mz1: (rows, headdim) value sums and (rows, 2) [reference m, normaliser z] of the prefix states
@@ -1211,7 +1239,7 @@ def _fwd_build_levels(
         return rank, S1, mz1, S2, mz2, 0
 
     npos = (1 << len(nblocks)) * chunk  # positions covered by the top level's block pair
-    krank = (g[..., 0] - g[..., 1]).reshape(batch_heads, seqlen)
+    krank = (g[..., 0] - g[..., 1] if krank is None else krank).reshape(batch_heads, seqlen)
     if npos > seqlen:
         krank = torch.nn.functional.pad(krank, (0, npos - seqlen))
     perm = torch.empty(total, device=device, dtype=torch.int64)
@@ -1255,7 +1283,14 @@ def _fwd_build_levels(
 
 
 def _order_attn_forward(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, v: torch.Tensor, chunk: int = 64, timer: Timer = None
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    v: torch.Tensor,
+    chunk: int = 64,
+    timer: Timer = None,
+    krank: Optional[torch.Tensor] = None,
+    qthr: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Forward pass: checks the inputs, then runs the kernels on their device.
 
@@ -1270,6 +1305,7 @@ def _order_attn_forward(
         v: (batch, nheads, seqlen, headdim) values.
         chunk: keys per chunk (a power of two >= 16).
         timer: called around the phases "sort", "scan", "search" and "query" (benchmarks).
+        krank, qthr: optional (batch, nheads, seqlen) branch keys of the keys and queries (default g1 - g2, f1 - f2).
     Return:
         out: (batch, nheads, seqlen, headdim) fp32 attention output.
         softmax_lse: (batch, nheads, seqlen) fp32 log-sum-exp of the logits of every query.
@@ -1278,9 +1314,9 @@ def _order_attn_forward(
         sink_prob: (batch, nheads, seqlen) fp32 p0, the sink probability.
         lse_residual: (batch, nheads, seqlen) fp32 TwoSum residual of softmax_lse (see the module docstring).
     """
-    _check_inputs(f, g, b, v, chunk)
+    _check_inputs(f, g, b, v, chunk, krank, qthr)
     with _on_device(f):
-        return _order_attn_forward_impl(f, g, b, v, chunk, timer)
+        return _order_attn_forward_impl(f, g, b, v, chunk, timer, krank=krank, qthr=qthr)
 
 
 def _order_attn_forward_impl(
@@ -1291,6 +1327,8 @@ def _order_attn_forward_impl(
     chunk: int,
     timer: Timer,
     out: Optional[torch.Tensor] = None,
+    krank: Optional[torch.Tensor] = None,
+    qthr: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """``_order_attn_forward`` on the current device, writing the output into ``out`` (contiguous fp32) if given."""
     batch, nheads, seqlen, _ = f.shape
@@ -1299,7 +1337,8 @@ def _order_attn_forward_impl(
     g = g.float().contiguous()
     b = b.float().contiguous()
     v = _as_kernel_values(v)
-    rank, S1, mz1, S2, mz2, nlevels = _fwd_build_levels(g, v, chunk, timer)
+    krank, qthr = _branch_keys(f, g, krank, qthr)
+    rank, S1, mz1, S2, mz2, nlevels = _fwd_build_levels(g, v, chunk, timer, krank)
     nchunks = triton.cdiv(seqlen, chunk)
     batch_heads = batch * nheads
     split = torch.empty(batch_heads * max(nlevels, 1) * seqlen, device=f.device, dtype=torch.int32)
@@ -1307,7 +1346,7 @@ def _order_attn_forward_impl(
         timer("search", True)
     if nlevels:
         _fwd_search_kernel[(triton.cdiv(seqlen, SEARCH_BLOCK_M) * batch_heads,)](
-            f,
+            qthr,
             rank,
             split,
             seqlen,
@@ -1336,6 +1375,8 @@ def _order_attn_forward_impl(
         g,
         b,
         v,
+        krank,
+        qthr,
         split,
         S1,
         mz1,
@@ -1375,8 +1416,7 @@ def _bwd_build_levels(
     dout: torch.Tensor,
     delta: torch.Tensor,
     chunk: int,
-    timer: Timer = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    timer: Timer = None, qthr: Optional[torch.Tensor] = None,) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """Sort every odd level block of queries by rank a(x) and scan it into the backward's suffix / prefix states.
 
     Same row layout as ``_fwd_build_levels`` (level l, bh, block k, sorted slot; nb_l blocks of Lb_l = chunk 2^l
@@ -1391,6 +1431,7 @@ def _bwd_build_levels(
         delta: (batch, nheads, seqlen) fp32 D = <dO, out>.
         chunk: keys per chunk.
         timer: called around the "sort" and "scan" phases.
+        qthr: (batch, nheads, seqlen) fp32 branch keys of the queries (default f1 - f2).
     Return:
         rank, S1, mz1, S2, mz2, nlevels: as ``_fwd_build_levels``, with S1 / mz1 the branch-1 SUFFIX states and
             S2 / mz2 the branch-2 PREFIX states of the payload [dO, D], see ``_bwd_scan_kernel``.
@@ -1406,7 +1447,7 @@ def _bwd_build_levels(
         return rank, S1, mz1, S2, mz2, 0
 
     npos = (1 << len(nblocks)) * chunk
-    qrank = (f[..., 0] - f[..., 1]).reshape(batch_heads, seqlen)  # bitwise the a(x) of the forward kernels
+    qrank = (f[..., 0] - f[..., 1] if qthr is None else qthr).reshape(batch_heads, seqlen)  # the a(x) of the forward
     if npos > seqlen:
         qrank = torch.nn.functional.pad(qrank, (0, npos - seqlen), value=float("inf"))
     perm = torch.empty(total, device=device, dtype=torch.int64)
@@ -1465,6 +1506,8 @@ def _order_attn_backward(
     lse_residual: torch.Tensor,
     chunk: int = 64,
     timer: Timer = None,
+    krank: Optional[torch.Tensor] = None,
+    qthr: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Backward pass from the forward's saved tensors (``_order_attn_forward``, in its return order).
 
@@ -1504,6 +1547,8 @@ def _order_attn_backward(
             dv,
             dv_sink,
             timer,
+            krank=krank,
+            qthr=qthr,
         )
         dv[:, :, 0] = dv_sink.sum(1).view(batch, nheads, headdim)  # key 0 is only ever the sink
         return df, dg, db, dv
@@ -1528,6 +1573,8 @@ def _order_attn_backward_impl(
     gate_weights: Optional[torch.Tensor] = None,
     component: int = 0,
     dgate_weights: Optional[torch.Tensor] = None,
+    krank: Optional[torch.Tensor] = None,
+    qthr: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """The backward on the current device (dout, f, g fp32 contiguous, v from ``_as_kernel_values``).
 
@@ -1586,13 +1633,16 @@ def _order_attn_backward_impl(
     if timer:
         timer("prep", False)
 
-    rank, S1, mz1, S2, mz2, nlevels = _bwd_build_levels(f, softmax_lse, lse_residual_k, dout, delta, chunk, timer)
+    krank, qthr = _branch_keys(f, g, krank, qthr)
+    rank, S1, mz1, S2, mz2, nlevels = _bwd_build_levels(
+        f, softmax_lse, lse_residual_k, dout, delta, chunk, timer, qthr=qthr
+    )
     split = torch.empty(batch_heads * max(nlevels, 1) * seqlen, device=device, dtype=torch.int32)
     if timer:
         timer("search", True)
     if nlevels:
         _bwd_search_kernel[(triton.cdiv(seqlen, SEARCH_BLOCK_M) * batch_heads,)](
-            g,
+            krank,
             rank,
             split,
             seqlen,
@@ -1616,6 +1666,8 @@ def _order_attn_backward_impl(
     _bwd_intra_kernel[(triton.cdiv(seqlen, intra_block_n) * batch_heads, triton.cdiv(headdim, intra_block_headdim))](
         f,
         g,
+        krank,
+        qthr,
         softmax_lse,
         lse_residual_k,
         delta,
@@ -1696,22 +1748,29 @@ class OrderAttnFunc(torch.autograd.Function):
     to the inputs, the backward reads them."""
 
     @staticmethod
-    def forward(ctx, f, g, b, v, chunk):
-        saved = _order_attn_forward(f, g, b, v, chunk)
-        ctx.save_for_backward(f, g, b, v, *saved)
+    def forward(ctx, f, g, b, v, chunk, rank=None, threshold=None):
+        saved = _order_attn_forward(f, g, b, v, chunk, krank=rank, qthr=threshold)
+        ctx.save_for_backward(f, g, b, v, *saved, rank, threshold)
         ctx.chunk = chunk
         return saved[0]
 
     @staticmethod
     @_no_double_backward
     def backward(ctx, dout):
-        f, g, b, v, *saved = ctx.saved_tensors
-        df, dg, db, dv = _order_attn_backward(dout, f, g, b, v, *saved, ctx.chunk)
-        return df.to(f.dtype), dg.to(g.dtype), db.to(b.dtype), dv.to(v.dtype), None
+        f, g, b, v, *rest = ctx.saved_tensors
+        saved, rank, threshold = rest[:-2], rest[-2], rest[-1]
+        df, dg, db, dv = _order_attn_backward(dout, f, g, b, v, *saved, ctx.chunk, krank=rank, qthr=threshold)
+        return df.to(f.dtype), dg.to(g.dtype), db.to(b.dtype), dv.to(v.dtype), None, None, None
 
 
 def order_attn_func(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, v: torch.Tensor, chunk: int = 64
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    v: torch.Tensor,
+    chunk: int = 64,
+    rank: Optional[torch.Tensor] = None,
+    threshold: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Causal softmax(order scores) @ v, equal to ``order_attention(f, g, b, v, causal=True)``.
 
@@ -1722,11 +1781,15 @@ def order_attn_func(
         b: (batch, nheads, seqlen) sink logit per query.
         v: (batch, nheads, seqlen, headdim) values, fp32 / bf16 / fp16 (accumulated in fp32).
         chunk: keys per chunk (a power of two >= 16): the dense intra-chunk tile and the leaves of the tree.
+        rank: optional (batch, nheads, seqlen) branch keys of the keys in place of g1 - g2.
+        threshold: optional (batch, nheads, seqlen) branch keys of the queries in place of f1 - f2: y is on branch 1
+            of x iff rank(y) <= threshold(x). Not differentiated (piecewise constant), e.g. the cell indices of the
+            quantised model (``learning.fenwick_cache.quantised_order_attn_func``) or integer codes.
     Return:
         out: (batch, nheads, seqlen, headdim) fp32 attention output, differentiable in f, g, b and v (Triton backward,
             same chunked tree).
     """
-    return OrderAttnFunc.apply(f, g, b, v, chunk)
+    return OrderAttnFunc.apply(f, g, b, v, chunk, rank, threshold)
 
 
 order_attention_triton = order_attn_func  # backward-compatible name
