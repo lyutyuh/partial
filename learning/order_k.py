@@ -18,28 +18,36 @@ App. E.2 conjecture, from re-sorting at each level) with O(N log^(K-2) N) memory
 
 The K = 2 case reduces to a sort and two scans and has a dedicated Triton kernel in ``linear_order``; this module is the
 general-K path (K = 3 is 2-D dominance, K = 4 is 3-D, ...).
+
+Layout: f, g (batch, seqlen, K); lengths (batch,).
 """
+import logging
 import math
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 
+logger = logging.getLogger(__name__)
+
 NEG = float("-inf")
 
 
-def _sortkey(x):
+def _sortkey(x: torch.Tensor) -> torch.Tensor:
     """Order-preserving float32 -> int64 map into [0, 2^32); -0.0 is canonicalised to +0.0."""
     x = x.float() + 0.0
-    b = x.view(torch.int32).to(torch.int64) & 0xFFFFFFFF
-    return torch.where(b >= 0x80000000, (~b) & 0xFFFFFFFF, b | 0x80000000)
+    bits = x.view(torch.int32).to(torch.int64) & 0xFFFFFFFF
+    return torch.where(bits >= 0x80000000, (~bits) & 0xFFFFFFFF, bits | 0x80000000)
 
 
-def _composite(seg, coord):
+def _composite(seg: torch.Tensor, coord: torch.Tensor) -> torch.Tensor:
     """Key that sorts by segment ascending, then by coordinate DESCENDING (so a dominated set is a prefix)."""
     return (seg << 32) | _sortkey(-coord)
 
 
 class _LogSumExp:
+    """Aggregation operator of the training path: log-sum-exp over a dominated set (no identities)."""
+
     @staticmethod
     def prefix(v, idx):
         return torch.logcumsumexp(v, dim=-1), None
@@ -51,6 +59,8 @@ class _LogSumExp:
 
 
 class _Max:
+    """Aggregation operator of the decoding path: max over a dominated set, carrying the argmax identity."""
+
     @staticmethod
     def prefix(v, idx):
         m, i = torch.cummax(v, dim=-1)
@@ -62,146 +72,165 @@ class _Max:
         return vals.gather(-1, best).squeeze(-1), idxs.gather(-1, best).squeeze(-1)
 
 
-def _dominance(hcoords, hw, hidx, qcoords, strict, op):
-    """Aggregate hw over the heads whose coordinates all dominate the query's: coord_d >= qcoord_d (> where strict).
+def _dominance(
+    head_coords: list[torch.Tensor],
+    head_logw: torch.Tensor,
+    head_idx: Optional[torch.Tensor],
+    query_coords: list[torch.Tensor],
+    strict: torch.Tensor,
+    op,
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """Aggregate head_logw over the heads whose coordinates all dominate the query's: coord_d >= qcoord_d (> where
+    strict).
 
-    Rows are independent problems (sentence x branch). Heads: coordinates ``hcoords`` (list of D tensors (R, M), M a
-    power of two), log-weights ``hw`` (R, M), identities ``hidx`` (R, M) or None. Queries: ``qcoords`` (list of D
-    tensors (R, Q)); ``strict`` is a (R, D) bool tensor. Returns (values (R, Q), identities or None).
+    Rows are independent problems (sentence x branch).
+
+    Args:
+        head_coords: D tensors (R, M) of head coordinates, M a power of two.
+        head_logw: (R, M) log-weights of the heads.
+        head_idx: (R, M) head identities, or None.
+        query_coords: D tensors (R, Q) of query coordinates.
+        strict: (R, D) bool, strict dominance per coordinate.
+        op: ``_LogSumExp`` or ``_Max``.
+
+    Returns:
+        values (R, Q) and identities (R, Q) or None.
 
     Range tree on dyadic blocks, one depth per coordinate. At depth d the heads of every level tuple live in one
     flattened array of T * M items sorted by (tuple, block, -coord_d), so each depth is a single sort and a single
     searchsorted for all branches, levels and sentences; a query's dominated prefix inside its block splits into one
     aligned block of size 2^l per set bit l of its length, which become the query's copies at the next depth.
     """
-    R, M = hw.shape
-    Q = qcoords[0].shape[1]
-    D = len(hcoords)
-    dev = hw.device
-    levels = int(math.log2(M)) + 1
-    ar = torch.arange(M, device=dev)
+    nrows, M = head_logw.shape
+    Q = query_coords[0].shape[1]
+    ndims = len(head_coords)
+    device = head_logw.device
+    nlevels = int(math.log2(M)) + 1
+    arange_m = torch.arange(M, device=device)
     sizes = [M]  # block size of each tuple
-    h_seg = torch.zeros(R, M, dtype=torch.int64, device=dev)  # seg = tuple * M + block
-    q_seg = torch.zeros(R, Q, dtype=torch.int64, device=dev)
-    q_ok = torch.ones(R, Q, dtype=torch.bool, device=dev)
-    hvals, hid, coords, qc = hw, hidx, list(hcoords), list(qcoords)
-    for d in range(D):
-        key, perm = ((h_seg << 32) | _sortkey(-coords[0])).sort(dim=-1)  # coords holds the not-yet-used dims
-        hvals = hvals.gather(-1, perm)
-        hid = hid.gather(-1, perm) if hid is not None else None
+    head_seg = torch.zeros(nrows, M, dtype=torch.int64, device=device)  # seg = tuple * M + block
+    query_seg = torch.zeros(nrows, Q, dtype=torch.int64, device=device)
+    query_ok = torch.ones(nrows, Q, dtype=torch.bool, device=device)
+    head_vals, head_ids, coords, query_c = head_logw, head_idx, list(head_coords), list(query_coords)
+    for d in range(ndims):
+        key, perm = ((head_seg << 32) | _sortkey(-coords[0])).sort(dim=-1)  # coords holds the not-yet-used dims
+        head_vals = head_vals.gather(-1, perm)
+        head_ids = head_ids.gather(-1, perm) if head_ids is not None else None
         coords = [c.gather(-1, perm) for c in coords[1:]]
-        T = len(sizes)
-        size_t = torch.tensor(sizes, device=dev)
-        qkey = ((q_seg << 32) | _sortkey(-qc[d])) - strict[:, d:d + 1].to(torch.int64)  # keys are injective ints
+        ntuples = len(sizes)
+        size_t = torch.tensor(sizes, device=device)
+        qkey = ((query_seg << 32) | _sortkey(-query_c[d])) - strict[:, d : d + 1].to(torch.int64)  # injective ints
         r = torch.searchsorted(key, qkey, right=True)  # end of the dominated prefix in the flattened array
-        qt, qb = q_seg // M, q_seg % M
+        qt, qb = query_seg // M, query_seg % M
         qstart = qt * M + qb * size_t[qt]
         n = r - qstart  # prefix length inside the query's block
-        if d == D - 1:
+        if d == ndims - 1:
             parts_v, parts_i = [], []
-            for t, S in enumerate(sizes):
-                sl = slice(t * M, (t + 1) * M)
-                P, I = op.prefix(hvals[:, sl].reshape(R, -1, S), hid[:, sl].reshape(R, -1, S) if hid is not None else None)
-                parts_v.append(P.reshape(R, M))
-                parts_i.append(I.reshape(R, M) if I is not None else None)
+            for t, size in enumerate(sizes):
+                cols = slice(t * M, (t + 1) * M)
+                P, I = op.prefix(
+                    head_vals[:, cols].reshape(nrows, -1, size),
+                    head_ids[:, cols].reshape(nrows, -1, size) if head_ids is not None else None,
+                )
+                parts_v.append(P.reshape(nrows, M))
+                parts_i.append(I.reshape(nrows, M) if I is not None else None)
             P = torch.cat(parts_v, dim=-1)
             pos = (r - 1).clamp(min=0)
-            val = torch.where(q_ok & (n > 0), P.gather(-1, pos), NEG).view(R, Q, -1)
-            idx = torch.cat(parts_i, dim=-1).gather(-1, pos).view(R, Q, -1) if hid is not None else None
+            val = torch.where(query_ok & (n > 0), P.gather(-1, pos), NEG).view(nrows, Q, -1)
+            idx = torch.cat(parts_i, dim=-1).gather(-1, pos).view(nrows, Q, -1) if head_ids is not None else None
             return op.combine(val, idx)
         # heads: tuple (t, l) for every level l <= log2(size_t); block = position within t's array >> l
-        lut = torch.full((T, levels), -1, dtype=torch.int64, device=dev)
+        lut = torch.full((ntuples, nlevels), -1, dtype=torch.int64, device=device)
         new_sizes, src, block = [], [], []
-        for t, S in enumerate(sizes):
-            for l in range(int(math.log2(S)) + 1):
+        for t, size in enumerate(sizes):
+            for l in range(int(math.log2(size)) + 1):
                 lut[t, l] = len(new_sizes)
                 new_sizes.append(1 << l)
-                src.append(t * M + ar)
-                block.append(ar >> l)
+                src.append(t * M + arange_m)
+                block.append(arange_m >> l)
         src = torch.cat(src)
-        h_seg = (torch.repeat_interleave(torch.arange(len(new_sizes), device=dev), M) * M + torch.cat(block)).expand(R, -1)
-        hvals = hvals[:, src]
-        hid = hid[:, src] if hid is not None else None
+        head_seg = (
+            torch.repeat_interleave(torch.arange(len(new_sizes), device=device), M) * M + torch.cat(block)
+        ).expand(nrows, -1)
+        head_vals = head_vals[:, src]
+        head_ids = head_ids[:, src] if head_ids is not None else None
         coords = [c[:, src] for c in coords]
         sizes = new_sizes
         # queries: one copy per level l; alive when bit l of n is set (and the level exists for its tuple)
-        lv = torch.arange(levels, device=dev)
+        lv = torch.arange(nlevels, device=device)
         n_e = n.unsqueeze(-1)
         has = ((n_e >> lv) & 1) == 1
-        new_qt = lut[qt.unsqueeze(-1).expand(-1, -1, levels), lv.expand(R, q_seg.shape[1], -1)]
+        new_qt = lut[qt.unsqueeze(-1).expand(-1, -1, nlevels), lv.expand(nrows, query_seg.shape[1], -1)]
         start_in_t = (qstart - qt * M).unsqueeze(-1) + ((n_e >> (lv + 1)) << (lv + 1))
         new_qb = torch.minimum(start_in_t >> lv, (M >> lv) - 1)
-        q_ok = (q_ok.unsqueeze(-1) & has & (new_qt >= 0)).reshape(R, -1)
-        q_seg = (new_qt.clamp(min=0) * M + new_qb).reshape(R, -1)
-        qc = [c.unsqueeze(-1).expand(-1, -1, levels).reshape(R, -1) for c in qc]
+        query_ok = (query_ok.unsqueeze(-1) & has & (new_qt >= 0)).reshape(nrows, -1)
+        query_seg = (new_qt.clamp(min=0) * M + new_qb).reshape(nrows, -1)
+        query_c = [c.unsqueeze(-1).expand(-1, -1, nlevels).reshape(nrows, -1) for c in query_c]
     raise AssertionError("unreachable")
 
 
-def _prepare(f, g, lengths):
+def _prepare_inputs(
+    f: torch.Tensor, g: torch.Tensor, lengths: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
+    """Checks the shapes and pads to a power of two; returns (f, g, valid mask, padded length, original length)."""
     if f.shape != g.shape or f.dim() != 3:
-        raise ValueError(f"expected f, g of shape (B, L, K), got {tuple(f.shape)} and {tuple(g.shape)}")
-    B, L, K = f.shape
-    S = 1 << max(L - 1, 0).bit_length()  # pad to a power of two so every dyadic block is full
-    f = F.pad(f.float(), (0, 0, 0, S - L))
-    g = F.pad(g.float(), (0, 0, 0, S - L))
+        raise ValueError(f"expected f, g of shape (batch, seqlen, K), got {tuple(f.shape)} and {tuple(g.shape)}")
+    batch, seqlen, K = f.shape
+    seqlen_padded = 1 << max(seqlen - 1, 0).bit_length()  # pad to a power of two so every dyadic block is full
+    f = F.pad(f.float(), (0, 0, 0, seqlen_padded - seqlen))
+    g = F.pad(g.float(), (0, 0, 0, seqlen_padded - seqlen))
     lengths = lengths.to(f.device)
-    if int(lengths.max()) > L:
-        raise ValueError(f"lengths up to {int(lengths.max())} exceed the padded length {L}")
-    valid = torch.arange(S, device=f.device)[None, :] < lengths[:, None]
-    return f, g, valid, S, L
+    if int(lengths.max()) > seqlen:
+        raise ValueError(f"lengths up to {int(lengths.max())} exceed the padded length {seqlen}")
+    valid = torch.arange(seqlen_padded, device=f.device)[None, :] < lengths[:, None]
+    return f, g, valid, seqlen_padded, seqlen
 
 
-def _branches(f, g, valid, S, op, with_idx):
-    """Per-branch aggregates (value - f_k), all K branches in one fused call; returns (K, B, S) values and identities."""
-    B, _, K = f.shape
+def _branch_inputs(
+    f: torch.Tensor, g: torch.Tensor, valid: torch.Tensor, K: int
+) -> tuple[list[torch.Tensor], list[torch.Tensor], torch.Tensor]:
+    """Dominance inputs for all K branches stacked along rows: coords (K-1 lists of (K*B, S)), weights, strict."""
+    batch, seqlen_padded, _ = f.shape
+    head_coords, query_coords, strict = [], [], []
+    for d in range(K - 1):
+        hc, qc, st = [], [], []
+        for k in range(K):
+            j = [j for j in range(K) if j != k][d]
+            hc.append(torch.where(valid, g[..., j] - g[..., k], NEG))
+            qc.append(f[..., j] - f[..., k])
+            st.append(torch.full((batch,), j < k, dtype=torch.bool, device=f.device))
+        head_coords.append(torch.cat(hc, 0))
+        query_coords.append(torch.cat(qc, 0))
+        strict.append(torch.cat(st, 0))
+    return head_coords, query_coords, torch.stack(strict, -1)
+
+
+def _branch_aggregates(
+    f: torch.Tensor, g: torch.Tensor, valid: torch.Tensor, seqlen_padded: int, op, with_idx: bool
+) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    """Per-branch aggregates (value - f_k), all K branches in one fused call: (K, B, S) values and identities."""
+    batch, _, K = f.shape
     if K == 1:  # every head is on the only branch
         w = torch.where(valid, g[..., 0], NEG)
         if with_idx:
             v, i = w.max(dim=-1, keepdim=True)
-            return (v - f[..., 0]).unsqueeze(0), i.expand(B, S).unsqueeze(0)
+            return (v - f[..., 0]).unsqueeze(0), i.expand(batch, seqlen_padded).unsqueeze(0)
         return (torch.logsumexp(w, dim=-1, keepdim=True) - f[..., 0]).unsqueeze(0), None
-    hcoords, qcoords, strict = [], [], []
-    for d in range(K - 1):
-        hc, qcd, st = [], [], []
-        for k in range(K):
-            j = [j for j in range(K) if j != k][d]
-            hc.append(torch.where(valid, g[..., j] - g[..., k], NEG))
-            qcd.append(f[..., j] - f[..., k])
-            st.append(torch.full((B,), j < k, dtype=torch.bool, device=f.device))
-        hcoords.append(torch.cat(hc, 0))
-        qcoords.append(torch.cat(qcd, 0))
-        strict.append(torch.cat(st, 0))
+    head_coords, query_coords, strict = _branch_inputs(f, g, valid, K)
     w = torch.cat([torch.where(valid, g[..., k], NEG) for k in range(K)], 0)
-    hidx = torch.arange(S, device=f.device).expand(K * B, S) if with_idx else None
-    v, i = _dominance(hcoords, w, hidx, qcoords, torch.stack(strict, -1), op)
-    fk = f.permute(2, 0, 1)  # (K, B, S)
-    return v.view(K, B, S) - fk, (i.view(K, B, S) if i is not None else None)
+    head_idx = torch.arange(seqlen_padded, device=f.device).expand(K * batch, seqlen_padded) if with_idx else None
+    v, i = _dominance(head_coords, w, head_idx, query_coords, strict, op)
+    f_k = f.permute(2, 0, 1)  # (K, B, S)
+    return v.view(K, batch, seqlen_padded) - f_k, (i.view(K, batch, seqlen_padded) if i is not None else None)
 
 
-def _branch_inputs(f, g, valid, K):
-    """Dominance inputs for all K branches stacked along rows: coords (K-1 lists of (K*B, S)), weights, strict."""
-    B, S, _ = f.shape
-    hcoords, qcoords, strict = [], [], []
-    for d in range(K - 1):
-        hc, qcd, st = [], [], []
-        for k in range(K):
-            j = [j for j in range(K) if j != k][d]
-            hc.append(torch.where(valid, g[..., j] - g[..., k], NEG))
-            qcd.append(f[..., j] - f[..., k])
-            st.append(torch.full((B,), j < k, dtype=torch.bool, device=f.device))
-        hcoords.append(torch.cat(hc, 0))
-        qcoords.append(torch.cat(qcd, 0))
-        strict.append(torch.cat(st, 0))
-    return hcoords, qcoords, torch.stack(strict, -1)
-
-
-class _LogPartitionK(torch.autograd.Function):
+class LogPartitionKFunc(torch.autograd.Function):
     """Z with a hand-written backward: dg is the transposed dominance problem, run as one more fused pass."""
 
     @staticmethod
     def forward(ctx, f, g, valid, include_root):
         with torch.no_grad():
-            vals, _ = _branches(f, g, valid, f.shape[1], _LogSumExp, with_idx=False)  # (K, B, S): L_k - f_k
+            vals, _ = _branch_aggregates(f, g, valid, f.shape[1], _LogSumExp, with_idx=False)  # (K, B, S): L_k - f_k
             if include_root:
                 vals = torch.cat([vals, torch.zeros_like(vals[:1])], 0)
             z = torch.logsumexp(vals, 0)
@@ -209,43 +238,45 @@ class _LogPartitionK(torch.autograd.Function):
         return z
 
     @staticmethod
-    def backward(ctx, gz):
+    def backward(ctx, dz):
         f, g, valid, branch, z = ctx.saved_tensors
-        B, S, K = f.shape
-        gz = torch.where(valid, gz, 0.0)
+        batch, seqlen_padded, K = f.shape
+        dz = torch.where(valid, dz, 0.0)
         p = torch.exp(branch - z)  # (K, B, S): mass of branch k for query x
-        df = -(gz * p).permute(1, 2, 0)
-        if K == 1:  # every head is in every query's set: dg(y) = exp(g(y)) * sum_x gz(x) exp(-f(x) - Z(x))
+        df = -(dz * p).permute(1, 2, 0)
+        if K == 1:  # every head is in every query's set: dg(y) = exp(g(y)) * sum_x dz(x) exp(-f(x) - Z(x))
             w = torch.where(valid, g[..., 0], NEG)
-            tot = (gz * torch.exp(-f[..., 0] - z)).sum(-1, keepdim=True)
+            tot = (dz * torch.exp(-f[..., 0] - z)).sum(-1, keepdim=True)
             dg = (torch.exp(w) * tot).unsqueeze(-1)
             return df, torch.where(valid.unsqueeze(-1), dg, 0.0), None, None
-        # transposed problem: "heads" are the queries x with log-weights log|gz(x)| - f_k(x) - Z(x) (split by sign),
+        # transposed problem: "heads" are the queries x with log-weights log|dz(x)| - f_k(x) - Z(x) (split by sign),
         # "queries" are the heads y; y in D_k(x) <=> -v(x) dominates -u(y), with the same strictness pattern
-        hcoords, qcoords, strict = _branch_inputs(f, g, valid, K)
-        t_h = [torch.cat([-c, -c], 0) for c in qcoords]  # (2*K*B, S): negated query coords, as heads
-        t_q = [torch.cat([-c, -c], 0) for c in hcoords]
+        head_coords, query_coords, strict = _branch_inputs(f, g, valid, K)
+        t_h = [torch.cat([-c, -c], 0) for c in query_coords]  # (2*K*B, S): negated query coords, as heads
+        t_q = [torch.cat([-c, -c], 0) for c in head_coords]
         t_strict = torch.cat([strict, strict], 0)
         logw = []
         for sign in (1.0, -1.0):
-            part = (gz * sign).clamp(min=0)
+            part = (dz * sign).clamp(min=0)
             lw = torch.where(valid & (part > 0), torch.log(part) - z, NEG)  # (B, S)
             logw.append(torch.cat([lw - f[..., k] for k in range(K)], 0))  # branch k rows
         t_w = torch.cat(logw, 0)
         T, _ = _dominance(t_h, t_w, None, t_q, t_strict, _LogSumExp)  # (2*K*B, S)
-        T = T.view(2, K, B, S)
-        gk = g.permute(2, 0, 1)  # (K, B, S)
-        dg = (torch.exp(gk + T[0]) - torch.exp(gk + T[1])).permute(1, 2, 0)
+        T = T.view(2, K, batch, seqlen_padded)
+        g_k = g.permute(2, 0, 1)  # (K, B, S)
+        dg = (torch.exp(g_k + T[0]) - torch.exp(g_k + T[1])).permute(1, 2, 0)
         return df, torch.where(valid.unsqueeze(-1), dg, 0.0), None, None
 
 
-def log_partition_k(f, g, lengths, include_root=True, autograd=True):
+def log_partition_k(
+    f: torch.Tensor, g: torch.Tensor, lengths: torch.Tensor, include_root: bool = True, autograd: bool = True
+) -> torch.Tensor:
     """Z(x) = log sum_y exp(s(x, y)) for every dependent x, any K; differentiable in f and g.
 
     Args:
-        f: Dependent realizer values, shape (B, L, K).
-        g: Head realizer values, shape (B, L, K).
-        lengths: Words per sentence, shape (B,); positions >= length are neither heads nor dependents.
+        f: Dependent realizer values, shape (batch, seqlen, K).
+        g: Head realizer values, shape (batch, seqlen, K).
+        lengths: Words per sentence, shape (batch,); positions >= length are neither heads nor dependents.
         include_root: Add the ROOT head with score 0.
         autograd: Differentiate through the tree with autograd (default). ``False`` uses the hand-written backward
             (one transposed dominance pass with the upstream gradient split by sign); it is exact and equally fast
@@ -253,36 +284,41 @@ def log_partition_k(f, g, lengths, include_root=True, autograd=True):
             the peak and the transposed pass doubles the rows.
 
     Returns:
-        Z of shape (B, L), fp32, 0 at padding positions.
+        Z of shape (batch, seqlen), fp32, 0 at padding positions.
     """
-    in_dtype = f.dtype
-    f, g, valid, S, L = _prepare(f, g, lengths)
+    f, g, valid, seqlen_padded, seqlen = _prepare_inputs(f, g, lengths)
     if autograd:
-        vals, _ = _branches(f, g, valid, S, _LogSumExp, with_idx=False)
+        vals, _ = _branch_aggregates(f, g, valid, seqlen_padded, _LogSumExp, with_idx=False)
         if include_root:
             vals = torch.cat([vals, torch.zeros_like(vals[:1])], 0)
         z = torch.logsumexp(vals, 0)
     else:
-        z = _LogPartitionK.apply(f, g, valid, include_root)
-    return torch.where(valid, z, 0.0)[:, :L]
+        z = LogPartitionKFunc.apply(f, g, valid, include_root)
+    return torch.where(valid, z, 0.0)[:, :seqlen]
 
 
 @torch.no_grad()
-def decode_k(f, g, lengths, include_root=True):
-    """Greedy heads argmax_y s(x, y) for any K, in the repo convention (0 = ROOT, j + 1 = word j); 0 at padding."""
-    f, g, valid, S, L = _prepare(f, g, lengths)
-    vals, idxs = _branches(f, g, valid, S, _Max, with_idx=True)
+def decode_k(
+    f: torch.Tensor, g: torch.Tensor, lengths: torch.Tensor, include_root: bool = True
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Greedy heads argmax_y s(x, y) for any K, in the repo convention (0 = ROOT, j + 1 = word j); 0 at padding.
+
+    Returns:
+        heads: (batch, seqlen) int32 and scores: (batch, seqlen) fp32 score of the selected head.
+    """
+    f, g, valid, seqlen_padded, seqlen = _prepare_inputs(f, g, lengths)
+    vals, idxs = _branch_aggregates(f, g, valid, seqlen_padded, _Max, with_idx=True)
     best, idx = _Max.combine(vals.movedim(0, -1), idxs.movedim(0, -1))
     heads = idx + 1
     if include_root:
         root = best <= 0.0  # torch.argmax picks the first column (ROOT) on ties
         best = torch.where(root, 0.0, best)
         heads = torch.where(root, 0, heads)
-    heads = torch.where(valid, heads, 0)[:, :L].to(torch.int32)
-    return heads, torch.where(valid, best, 0.0)[:, :L]
+    heads = torch.where(valid, heads, 0)[:, :seqlen].to(torch.int32)
+    return heads, torch.where(valid, best, 0.0)[:, :seqlen]
 
 
-def gold_arc_score_k(f, g, heads):
+def gold_arc_score_k(f: torch.Tensor, g: torch.Tensor, heads: torch.Tensor) -> torch.Tensor:
     """s(x, h(x)) for gold heads (0 = ROOT, j + 1 = word j), with the kernels' branch rule at exact ties."""
     f = f.float()
     g = g.float()
@@ -293,7 +329,9 @@ def gold_arc_score_k(f, g, heads):
     return torch.where(heads == 0, torch.zeros_like(score), score)
 
 
-def arc_loss_k(f, g, heads, lengths, include_root=True):
+def arc_loss_k(
+    f: torch.Tensor, g: torch.Tensor, heads: torch.Tensor, lengths: torch.Tensor, include_root: bool = True
+) -> torch.Tensor:
     """Arc cross-entropy, mean over words, in O(N log^(K-1) N) memory; heads = -1 marks padding."""
     lengths = lengths.to(heads.device)
     valid = (heads >= 0) & (torch.arange(heads.shape[1], device=heads.device)[None, :] < lengths[:, None])

@@ -28,7 +28,7 @@ if not torch.cuda.is_available():
     pytest.skip("the Triton order attention tests need a GPU", allow_module_level=True)
 
 from learning.order_attention_triton import (  # noqa: E402
-    _order_attention_bwd, _order_attention_fwd, mixture_attention_triton, order_attention_triton,
+    _order_attn_backward, _order_attn_forward, mixture_attn_func, order_attn_func,
 )
 
 DEVICE = "cuda"
@@ -66,7 +66,7 @@ def _dense_stats(f, g, b, V, dtype=torch.float32, rows=None):
 
 
 def _check_stats(f, g, b, V, chunk, tol=TOL):
-    got = _order_attention_fwd(f, g, b, V, chunk)
+    got = _order_attn_forward(f, g, b, V, chunk)
     for name, x, ref in zip(("out", "lse", "A1", "U1", "p0"), got, _dense_stats(f, g, b, V)):
         torch.testing.assert_close(x, ref.float(), **tol, msg=lambda m: f"{name}: {m}")
     lse, lerr = got[1], got[5]
@@ -82,7 +82,7 @@ def test_matches_dense_and_torch(N, B, H, d):
     dense = dense_order_attention(f, g, b, V)
     tree = order_attention(f, g, b, V, True, 64)
     for chunk in (16, 64):
-        out = order_attention_triton(f, g, b, V, chunk)
+        out = order_attn_func(f, g, b, V, chunk)
         assert out.shape == (B, H, N, d) and out.dtype == torch.float32
         torch.testing.assert_close(out, dense, **TOL)
         torch.testing.assert_close(out, tree, **TOL)
@@ -104,7 +104,7 @@ def test_ties(N, chunk):
     f, g, b, V = _inputs(7 + N, 2, 3, N, 64, scale=4.0)
     f, g, b = f.round(), g.round(), b.round()
     _check_stats(f, g, b, V, chunk)
-    torch.testing.assert_close(order_attention_triton(f, g, b, V, chunk), order_attention(f, g, b, V, True, 64), **TOL)
+    torch.testing.assert_close(order_attn_func(f, g, b, V, chunk), order_attention(f, g, b, V, True, 64), **TOL)
 
 
 @pytest.mark.parametrize("rounded", [False, True])
@@ -121,7 +121,7 @@ def test_large_magnitudes(N, chunk, rounded):
         f, g, b = f.round(), g.round(), b.round()
     span = (g[..., 0] - g[..., 0].amin(-1, keepdim=True)).amax()
     assert float(span) > 300
-    got = _check_stats(f, g, b, V, chunk) if rounded else _order_attention_fwd(f, g, b, V, chunk)
+    got = _check_stats(f, g, b, V, chunk) if rounded else _order_attn_forward(f, g, b, V, chunk)
     tol = TOL if rounded else dict(rtol=2e-5, atol=2e-5)
     for name, x, ref in zip(("out", "lse", "A1", "U1", "p0"), got, _dense_stats(f, g, b, V, torch.float64)):
         torch.testing.assert_close(x, ref.float(), **tol, msg=lambda m: f"{name}: {m}")
@@ -148,7 +148,7 @@ def test_one_branch(N, chunk, branch):
 def test_low_precision_values(N, chunk, vdtype):
     """bf16 / fp16 values are read as they are and accumulated in fp32: same output as the fp32 reference of V."""
     f, g, b, V = _inputs(5 + N, 2, 3, N, 128, vdtype=vdtype)
-    out = order_attention_triton(f, g, b, V, chunk)
+    out = order_attn_func(f, g, b, V, chunk)
     assert out.dtype == torch.float32
     torch.testing.assert_close(out, dense_order_attention(f, g, b, V), **TOL)
     _check_stats(f, g, b, V, chunk)
@@ -157,7 +157,7 @@ def test_low_precision_values(N, chunk, vdtype):
 @pytest.mark.parametrize("d", [8, 80])
 def test_odd_value_dims(d):
     f, g, b, V = _inputs(d, 1, 2, 300, d)
-    torch.testing.assert_close(order_attention_triton(f, g, b, V, 16), dense_order_attention(f, g, b, V), **TOL)
+    torch.testing.assert_close(order_attn_func(f, g, b, V, 16), dense_order_attention(f, g, b, V), **TOL)
 
 
 def test_noncontiguous_inputs():
@@ -165,7 +165,7 @@ def test_noncontiguous_inputs():
     ft, gt = f.transpose(1, 2).contiguous().transpose(1, 2), g.transpose(1, 2).contiguous().transpose(1, 2)
     Vt = V.transpose(1, 2).contiguous().transpose(1, 2)
     assert not ft.is_contiguous() and not Vt.is_contiguous()
-    torch.testing.assert_close(order_attention_triton(ft, gt, b, Vt, 16), dense_order_attention(f, g, b, V), **TOL)
+    torch.testing.assert_close(order_attn_func(ft, gt, b, Vt, 16), dense_order_attention(f, g, b, V), **TOL)
 
 
 @pytest.mark.parametrize("N,chunk", [(20, 16), (700, 64)])
@@ -176,7 +176,7 @@ def test_mixture_matches_reference(N, chunk):
     gates = torch.randn(B, H, N, M, generator=torch.Generator().manual_seed(2)).to(DEVICE)
     w = torch.softmax(gates, -1)
     dense = sum(w[..., i:i + 1] * dense_order_attention(*comps[i], V) for i in range(M))
-    out = mixture_attention_triton(gates, comps, V, chunk)
+    out = mixture_attn_func(gates, comps, V, chunk)
     torch.testing.assert_close(out, dense, **TOL)
     torch.testing.assert_close(out, mixture_attention(gates, comps, V, True, 64), **TOL)
 
@@ -197,7 +197,7 @@ def test_long_sequence_rows(N, chunk):
     """Deep trees (10 / 12 levels, blocks up to 32768 keys) vs dense rows: queries at and before every 37th chunk
     boundary, 200 random ones and the last."""
     f, g, b, V = _inputs(N, 1, 2, N, 64)
-    out = order_attention_triton(f, g, b, V, chunk)
+    out = order_attn_func(f, g, b, V, chunk)
     gen = torch.Generator().manual_seed(0)
     bounds = torch.arange(0, N, chunk * 37)
     rows = torch.cat([bounds, (bounds - 1).clamp(min=0), torch.randint(0, N, (200,), generator=gen),
@@ -236,7 +236,7 @@ def test_long_block_accumulation(case):
     the slopes)."""
     N = 1 << 20
     f, g, b, V = _long_block_inputs(case, N)
-    got = _order_attention_fwd(f, g, b, V, 64)
+    got = _order_attn_forward(f, g, b, V, 64)
     gen = torch.Generator().manual_seed(1)
     rows = torch.cat([torch.arange(N - 32, N), torch.randint(N // 2, N, (32,), generator=gen)]).unique().to(DEVICE)
     for name, x, ref in zip(("out", "lse", "A1", "U1", "p0"), got, _dense_stats(f, g, b, V, torch.float64, rows)):
@@ -249,11 +249,11 @@ def test_cuda_graph_capture():
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
-        order_attention_triton(*static, 64)  # compile and warm up outside the capture
+        order_attn_func(*static, 64)  # compile and warm up outside the capture
     torch.cuda.current_stream().wait_stream(s)
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
-        out = order_attention_triton(*static, 64)
+        out = order_attn_func(*static, 64)
     for seed in (2, 3):
         fresh = _inputs(seed, 2, 3, 1000, 64)
         for dst, src in zip(static, fresh):
@@ -269,14 +269,14 @@ def test_cuda_graph_first_call_and_churn():
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
-        order_attention_triton(*_inputs(1, 2, 3, 1000, 64), 64)  # compile the kernels on another shape
+        order_attn_func(*_inputs(1, 2, 3, 1000, 64), 64)  # compile the kernels on another shape
     torch.cuda.current_stream().wait_stream(s)
     static = [t.clone() for t in _inputs(2, 1, 5, 1000, 64)]
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
-        out = order_attention_triton(*static, 64)
+        out = order_attn_func(*static, 64)
     for bh in range(1, 300):
-        _order_attention_fwd(*_inputs(bh, bh, 1, 200, 64), 64)
+        _order_attn_forward(*_inputs(bh, bh, 1, 200, 64), 64)
     torch.cuda.synchronize()
     junk = [torch.zeros(64, dtype=torch.int64, device=DEVICE) for _ in range(4000)]  # reuse freed blocks
     for seed in (3, 4):
@@ -292,9 +292,9 @@ def test_cuda_graph_first_call_and_churn():
 def test_non_current_device():
     f, g, b, V = (t.to("cuda:1") for t in _inputs(4, 1, 2, 300, 32))
     assert torch.cuda.current_device() == 0
-    torch.testing.assert_close(order_attention_triton(f, g, b, V, 16), dense_order_attention(f, g, b, V), **TOL)
+    torch.testing.assert_close(order_attn_func(f, g, b, V, 16), dense_order_attention(f, g, b, V), **TOL)
     gates = torch.zeros(1, 2, 300, 2, device="cuda:1")
-    torch.testing.assert_close(mixture_attention_triton(gates, [(f, g, b)] * 2, V, 16),
+    torch.testing.assert_close(mixture_attn_func(gates, [(f, g, b)] * 2, V, 16),
                                dense_order_attention(f, g, b, V), **TOL)
 
 
@@ -309,16 +309,16 @@ def test_double_backward_raises():
     f, g, b, V = (t.requires_grad_() for t in _inputs(1, 1, 2, 40, 16))
     c = _upstream(1, (1, 2, 40, 16))
     for loss in (lambda o: o.sum(), lambda o: (o * c).sum(), lambda o: (o ** 2).sum()):
-        out = order_attention_triton(f, g, b, V, 16)
+        out = order_attn_func(f, g, b, V, 16)
         with pytest.raises(RuntimeError, match=DOUBLE):
             torch.autograd.grad(loss(out), (f, g, b, V), create_graph=True)
-        out = order_attention_triton(f, g, b, V, 16)
+        out = order_attn_func(f, g, b, V, 16)
         with pytest.raises(RuntimeError, match=DOUBLE):
             loss(out).backward(create_graph=True)
     with pytest.raises(RuntimeError, match=DOUBLE):
-        torch.autograd.functional.hvp(lambda x: (order_attention_triton(x, g, b, V, 16) * c).sum(), f.detach(),
+        torch.autograd.functional.hvp(lambda x: (order_attn_func(x, g, b, V, 16) * c).sum(), f.detach(),
                                       torch.ones_like(f))
-    out = order_attention_triton(f, g, b, V, 16)  # first order: unaffected, and the gradients carry no graph
+    out = order_attn_func(f, g, b, V, 16)  # first order: unaffected, and the gradients carry no graph
     grads = torch.autograd.grad((out * c).sum(), (f, g, b, V))
     assert all(x.grad_fn is None and not x.requires_grad for x in grads)
 
@@ -326,11 +326,11 @@ def test_double_backward_raises():
 def test_input_validation():
     f, g, b, V = _inputs(1, 1, 1, 10, 16)
     with pytest.raises(ValueError):
-        order_attention_triton(f, g, b, V, 24)  # not a power of two
+        order_attn_func(f, g, b, V, 24)  # not a power of two
     with pytest.raises(ValueError):
-        order_attention_triton(f, g, b, V, 8)  # below 16
+        order_attn_func(f, g, b, V, 8)  # below 16
     with pytest.raises(ValueError):
-        order_attention_triton(f[..., :1], g, b, V, 16)
+        order_attn_func(f[..., :1], g, b, V, 16)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -389,7 +389,7 @@ def _check_grads(f, g, b, V, chunks, dO, tol=GRAD_TOL, dense32=True):
     ref = _grads(_rank_dense, (f, g, b, V), dO)
     ref32 = _fold(_grads(dense_order_attention, (f, g, b, V), dO)) if dense32 else None
     for chunk in chunks:
-        got = _grads(lambda *a: order_attention_triton(*a, chunk), (f, g, b, V), dO)
+        got = _grads(lambda *a: order_attn_func(*a, chunk), (f, g, b, V), dO)
         _assert_grads(got, ref, tol)
         if dense32:
             _assert_grads(_fold(got), ref32, 2 * tol, ("df1+df2", "dg1+dg2", "db", "dV"))
@@ -455,11 +455,11 @@ def test_grad_low_precision_values(N, chunk, vdtype):
     of the same values); the returned dV is that, rounded to the value dtype."""
     f, g, b, V = _inputs(5 + N, 2, 3, N, 128, vdtype=vdtype)
     dO = _upstream(5 + N, (2, 3, N, 128))
-    got = _grads(lambda *a: order_attention_triton(*a, chunk), (f, g, b, V), dO)
+    got = _grads(lambda *a: order_attn_func(*a, chunk), (f, g, b, V), dO)
     ref = _grads(_rank_dense, (f, g, b, V.float()), dO)
     assert got[3].dtype == vdtype
     _assert_grads(got[:3], ref[:3])
-    dV32 = _order_attention_bwd(f, g, b, V, *_order_attention_fwd(f, g, b, V, chunk), dO, chunk)[3]
+    dV32 = _order_attn_backward(dO, f, g, b, V, *_order_attn_forward(f, g, b, V, chunk), chunk)[3]
     _assert_grads([dV32], ref[3:], names=("dV fp32",))
     torch.testing.assert_close(got[3], dV32.to(vdtype), rtol=0, atol=0)
 
@@ -477,7 +477,7 @@ def test_grad_noncontiguous_inputs_and_upstream():
     Vt = V.transpose(1, 2).contiguous().transpose(1, 2)
     dO = _upstream(9, (2, 150, 3, 64)).transpose(1, 2)
     assert not ft.is_contiguous() and not Vt.is_contiguous() and not dO.is_contiguous()
-    got = _grads(lambda *a: order_attention_triton(*a, 16), (ft, gt, b, Vt), dO)
+    got = _grads(lambda *a: order_attn_func(*a, 16), (ft, gt, b, Vt), dO)
     _assert_grads(got, _grads(_rank_dense, (f, g, b, V), dO.contiguous()))
 
 
@@ -487,13 +487,13 @@ def test_grad_input_dtypes_and_partial_requires_grad():
     f, g, b, V = _inputs(13, 1, 2, 200, 32)
     dO = _upstream(13, (1, 2, 200, 32))
     lo = [t.bfloat16() for t in (f, g, b, V)]
-    got = _grads(lambda *a: order_attention_triton(*a, 16), lo, dO)
+    got = _grads(lambda *a: order_attn_func(*a, 16), lo, dO)
     ref = _grads(_rank_dense, [t.float() for t in lo], dO)
     for x, r in zip(got, ref):
         assert x.dtype == torch.bfloat16
         torch.testing.assert_close(x, r.bfloat16())
     V2 = V.clone().requires_grad_()
-    order_attention_triton(f, g, b, V2, 16).backward(dO)
+    order_attn_func(f, g, b, V2, 16).backward(dO)
     torch.testing.assert_close(V2.grad.double(), _grads(_rank_dense, (f, g, b, V), dO)[3].double(), rtol=0, atol=1e-5)
 
 
@@ -533,7 +533,7 @@ def test_grad_long_sequence(N, chunk):
     runs past N) against the full fp64 gradients."""
     f, g, b, V = _inputs(N, 1, 2, N, 32)
     dO = _upstream(N, (1, 2, N, 32))
-    got = _grads(lambda *a: order_attention_triton(*a, chunk), (f, g, b, V), dO)
+    got = _grads(lambda *a: order_attn_func(*a, chunk), (f, g, b, V), dO)
     _assert_grads(got, _dense_grads_rows(f, g, b, V, dO))
 
 
@@ -573,8 +573,8 @@ def test_grad_long_block_accumulation(case):
     else:
         f, g, b, V = _long_block_inputs(case, N)
     dO = _upstream(len(case), V.shape)
-    out, lse, A1, U1, p0, lerr = _order_attention_fwd(f, g, b, V, 64)
-    df, dg, db, dV = _order_attention_bwd(f, g, b, V, out, lse, A1, U1, p0, lerr, dO, 64)
+    out, lse, A1, U1, p0, lerr = _order_attn_forward(f, g, b, V, 64)
+    df, dg, db, dV = _order_attn_backward(dO, f, g, b, V, out, lse, A1, U1, p0, lerr, 64)
     gen = torch.Generator().manual_seed(2)
     keys = torch.cat([torch.arange(1, 33), torch.randint(1, N // 2, (32,), generator=gen)]).unique().to(DEVICE)
     rdV, rdg = _key_grads_given_forward(f, g, V, dO, lse, lerr, out, keys)
@@ -599,7 +599,7 @@ def test_mixture_grads(N, chunk):
     dense = mix(lambda gt, cs, V: sum(torch.softmax(gt.double(), -1)[..., i:i + 1] * _rank_dense(*cs[i], V)
                                       for i in range(M)))
     inputs = [gates, V] + [t for c in comps for t in c]
-    got = _grads(mix(lambda gt, cs, V: mixture_attention_triton(gt, cs, V, chunk)), inputs, dO)
+    got = _grads(mix(lambda gt, cs, V: mixture_attn_func(gt, cs, V, chunk)), inputs, dO)
     names = ["dgates", "dV"] + [f"d{n}{i}" for i in range(M) for n in "fgb"]
     _assert_grads(got, _grads(dense, inputs, dO), names=names)
 
@@ -609,7 +609,7 @@ def _autograd_mixture(gates, comps, V, chunk):
     w = torch.softmax(gates.float(), dim=-1)
     out = 0
     for i, (f, g, b) in enumerate(comps):
-        out = out + w[..., i:i + 1] * order_attention_triton(f, g, b, V, chunk)
+        out = out + w[..., i:i + 1] * order_attn_func(f, g, b, V, chunk)
     return out
 
 
@@ -647,15 +647,15 @@ def test_mixture_fused_matches_autograd(B, H, N, d, M, chunk):
     drops one component at a time, gives the same output bits as the grad forward."""
     inputs = _mix_inputs(N + d + M, B, H, N, d, M)
     dO = _upstream(N + M, (B, H, N, d))
-    got = _grads(_mix_fn(mixture_attention_triton, chunk), inputs, dO)
+    got = _grads(_mix_fn(mixture_attn_func, chunk), inputs, dO)
     _assert_grads(got, _grads(_mix_fn(_autograd_mixture, chunk), inputs, dO), names=_mix_names(M))
-    out = _mix_fn(mixture_attention_triton, chunk)(*[t.clone().requires_grad_() for t in inputs])
+    out = _mix_fn(mixture_attn_func, chunk)(*[t.clone().requires_grad_() for t in inputs])
     assert out.requires_grad
     with torch.no_grad():
-        out_ng = _mix_fn(mixture_attention_triton, chunk)(*inputs)
+        out_ng = _mix_fn(mixture_attn_func, chunk)(*inputs)
         torch.testing.assert_close(out_ng, _mix_fn(_autograd_mixture, chunk)(*inputs), rtol=1e-6, atol=1e-6)
     assert torch.equal(out_ng, out.detach())
-    assert torch.equal(_mix_fn(mixture_attention_triton, chunk)(*inputs), out_ng)  # nothing requires grad: no-grad path
+    assert torch.equal(_mix_fn(mixture_attn_func, chunk)(*inputs), out_ng)  # nothing requires grad: no-grad path
 
 
 @pytest.mark.parametrize("case", ["underflow", "neg_inf"])
@@ -670,7 +670,7 @@ def test_mixture_zero_weights(case):
     w = torch.softmax(inputs[0], -1)
     assert float((w == 0).float().mean()) > 0.3
     dO = _upstream(31, (2, 2, 700, 32))
-    got = _grads(_mix_fn(mixture_attention_triton, 64), inputs, dO)
+    got = _grads(_mix_fn(mixture_attn_func, 64), inputs, dO)
     _assert_grads(got, _grads(_mix_fn(_autograd_mixture, 64), inputs, dO), names=_mix_names(M))
     if case == "neg_inf":
         assert float(got[0][..., 1].abs().max()) == 0.0
@@ -685,15 +685,15 @@ def test_mixture_dtypes_and_partial_requires_grad():
     inputs = _mix_inputs(41, 1, 2, 200, 32, M)
     dO = _upstream(41, (1, 2, 200, 32))
     lo = [t.bfloat16() for t in inputs]
-    got = _grads(_mix_fn(mixture_attention_triton, chunk), lo, dO)
-    ref = _grads(_mix_fn(mixture_attention_triton, chunk), [t.float() for t in lo], dO)
+    got = _grads(_mix_fn(mixture_attn_func, chunk), lo, dO)
+    ref = _grads(_mix_fn(mixture_attn_func, chunk), [t.float() for t in lo], dO)
     for name, x, r in zip(_mix_names(M), got, ref):
         assert x.dtype == torch.bfloat16, name
         torch.testing.assert_close(x, r.bfloat16(), msg=lambda m: f"{name}: {m}")
-    full = _grads(_mix_fn(mixture_attention_triton, chunk), inputs, dO)
+    full = _grads(_mix_fn(mixture_attn_func, chunk), inputs, dO)
     for which in ([0], [1], [5, 6, 7], [2, 9]):  # gates only, V only, component 1 only, f0 and g2
         xs = [t.clone().requires_grad_(i in which) for i, t in enumerate(inputs)]
-        _mix_fn(mixture_attention_triton, chunk)(*xs).backward(dO)
+        _mix_fn(mixture_attn_func, chunk)(*xs).backward(dO)
         for i, x in enumerate(xs):
             if i in which:
                 assert torch.equal(x.grad, full[i]), (which, i)
@@ -707,7 +707,7 @@ def test_mixture_nograd_memory():
     per-query statistics; checked at half that)."""
     B, H, N, d, M = 1, 4, 4096, 64, 4
     inputs = _mix_inputs(51, B, H, N, d, M)
-    fn = _mix_fn(mixture_attention_triton, 64)
+    fn = _mix_fn(mixture_attn_func, 64)
     leaves = [t.clone().requires_grad_() for t in inputs]
     fn(*leaves)  # compile both paths
     fn(*inputs)
@@ -731,7 +731,7 @@ def test_cuda_graph_mixture_forward_backward():
     B, H, N, d, M = 2, 3, 1000, 64, 3
     static = [t.clone().requires_grad_() for t in _mix_inputs(1, B, H, N, d, M)]
     dO = _upstream(1, (B, H, N, d))
-    fn = _mix_fn(mixture_attention_triton, 64)
+    fn = _mix_fn(mixture_attn_func, 64)
     s = torch.cuda.Stream()
     s.wait_stream(torch.cuda.current_stream())
     with torch.cuda.stream(s):
@@ -759,19 +759,19 @@ def test_mixture_double_backward_raises_and_validation():
     inputs = [t.requires_grad_() for t in _mix_inputs(3, 1, 2, 40, 16, 2)]
     c = _upstream(3, (1, 2, 40, 16))
     for loss in (lambda o: o.sum(), lambda o: (o * c).sum(), lambda o: (o ** 2).sum()):
-        out = _mix_fn(mixture_attention_triton, 16)(*inputs)
+        out = _mix_fn(mixture_attn_func, 16)(*inputs)
         with pytest.raises(RuntimeError, match=DOUBLE):
             torch.autograd.grad(loss(out), inputs, create_graph=True)
     gates, V, *flat = (t.detach() for t in inputs)
     comps = [flat[:3], flat[3:]]
     with pytest.raises(ValueError):
-        mixture_attention_triton(gates[..., :1], comps, V, 16)  # M = 1 gate for 2 components
+        mixture_attn_func(gates[..., :1], comps, V, 16)  # M = 1 gate for 2 components
     with pytest.raises(ValueError):
-        mixture_attention_triton(gates[..., :0], [], V, 16)
+        mixture_attn_func(gates[..., :0], [], V, 16)
     with pytest.raises(ValueError):
-        mixture_attention_triton(gates, [flat[:3], flat[3:5]], V, 16)  # a component without b
+        mixture_attn_func(gates, [flat[:3], flat[3:5]], V, 16)  # a component without b
     with pytest.raises(ValueError):
-        mixture_attention_triton(gates, comps, V, 24)
+        mixture_attn_func(gates, comps, V, 24)
 
 
 def test_grads_finite_differences():
@@ -787,8 +787,8 @@ def test_grads_finite_differences():
     g[..., 1] = g[..., 0] - (torch.randint(-3, 4, (B, H, N), generator=gen) - 0.25).to(DEVICE)  # r(y) in Z - 1/4
     dO = _upstream(21, (B, H, N, d))
     xs = [f, g, b, V]
-    grads = _grads(lambda *a: order_attention_triton(*a, chunk), xs, dO)
-    loss = lambda args: float((order_attention_triton(*args, chunk).double() * dO.double()).sum())  # noqa: E731
+    grads = _grads(lambda *a: order_attn_func(*a, chunk), xs, dO)
+    loss = lambda args: float((order_attn_func(*args, chunk).double() * dO.double()).sum())  # noqa: E731
     gen = torch.Generator().manual_seed(5)
     h = 1e-2
     for i, (x, gr) in enumerate(zip(xs, grads)):
@@ -817,13 +817,13 @@ def test_cuda_graph_forward_backward():
         for _ in range(2):  # compile and warm up outside the capture
             for t in static:
                 t.grad = None
-            order_attention_triton(*static, 64).backward(dO)
+            order_attn_func(*static, 64).backward(dO)
     torch.cuda.current_stream().wait_stream(s)
     for t in static:
         t.grad = None
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
-        order_attention_triton(*static, 64).backward(dO)
+        order_attn_func(*static, 64).backward(dO)
     for seed in (2, 3):
         fresh = _inputs(seed, *shape)
         with torch.no_grad():
@@ -858,7 +858,7 @@ def test_sink_below_neg(which):
     mask = slice(0, 1) if which == "first" else slice(None)
     b[:, :, mask] = torch.finfo(torch.float32).min
     for chunk in (16, 64):
-        got = _order_attention_fwd(f, g, b, V, chunk)
+        got = _order_attn_forward(f, g, b, V, chunk)
         for name, x, ref in zip(("out", "lse", "A1", "U1", "p0"), got, _dense_stats(f, g, b, V, torch.float64)):
             x, ref = (x, ref) if name != "lse" else (x[:, :, 1:], ref[:, :, 1:])
             torch.testing.assert_close(x, ref.float(), **TOL, msg=lambda m: f"{name}: {m}")
@@ -870,12 +870,12 @@ def test_sink_below_neg(which):
     inputs = _mix_inputs(61, B, H, N, d, M)
     inputs[4] = inputs[4].clone()
     inputs[4][:, :, mask] = torch.finfo(torch.float32).min  # component 0's b
-    _assert_grads(_grads(_mix_fn(mixture_attention_triton, 16), inputs, dO), _grads(_dense_mixture64(M), inputs, dO),
+    _assert_grads(_grads(_mix_fn(mixture_attn_func, 16), inputs, dO), _grads(_dense_mixture64(M), inputs, dO),
                   names=_mix_names(M))
     for bad, rows in ((float("-inf"), [0]), (float("nan"), [0, 7, 150])):
         b2 = b.clone()
         b2[:, :, rows] = bad
-        out, dense = order_attention_triton(f, g, b2, V, 16), dense_order_attention(f, g, b2, V)
+        out, dense = order_attn_func(f, g, b2, V, 16), dense_order_attention(f, g, b2, V)
         keep = torch.ones(N, dtype=torch.bool, device=DEVICE)
         keep[rows] = False
         assert bool(out[:, :, rows].isnan().all()) and bool(dense[:, :, rows].isnan().all())
@@ -900,18 +900,18 @@ def test_masked_queries(mode):
     f, g, b, V = _inputs(71, B, H, N, d)
     f = mask(f)
     for chunk in (16, 64):
-        torch.testing.assert_close(order_attention_triton(f, g, b, V, chunk), dense_order_attention(f, g, b, V), **TOL)
+        torch.testing.assert_close(order_attn_func(f, g, b, V, chunk), dense_order_attention(f, g, b, V), **TOL)
     dO = _upstream(71, (B, H, N, d))
     df, dg, db, dV = _check_grads(f, g, b, V, (16, 64), dO)
     for i in k:
         assert float(df[:, :, masked, i].abs().max()) == 0.0
     inputs = _mix_inputs(71, B, H, N, d, M)
     inputs[2] = mask(inputs[2])  # component 0's f
-    _assert_grads(_grads(_mix_fn(mixture_attention_triton, 16), inputs, dO), _grads(_dense_mixture64(M), inputs, dO),
+    _assert_grads(_grads(_mix_fn(mixture_attn_func, 16), inputs, dO), _grads(_dense_mixture64(M), inputs, dO),
                   names=_mix_names(M))
     f = f.clone()  # a NaN f is not a mask: it still propagates into the earlier keys' gradients
     f[:, :, 200, k] = float("nan")
-    dg = _grads(lambda *a: order_attention_triton(*a, 16), (f, g, b, V), dO)[1]
+    dg = _grads(lambda *a: order_attn_func(*a, 16), (f, g, b, V), dO)[1]
     assert bool(dg[:, :, :100].isnan().any())
 
 
@@ -925,17 +925,17 @@ def test_many_heads():
     V, dO = (torch.randn(B, H, N, d, device=DEVICE, generator=gen) for _ in range(2))
     heads = torch.tensor([0, 1, 2, H - 3, H - 2, H - 1], device=DEVICE)
     sub = lambda t: t.index_select(1, heads)  # noqa: E731
-    got = _grads(lambda *a: order_attention_triton(*a, 16), (f, g, b, V), dO)
-    torch.testing.assert_close(sub(order_attention_triton(f, g, b, V, 16)),
+    got = _grads(lambda *a: order_attn_func(*a, 16), (f, g, b, V), dO)
+    torch.testing.assert_close(sub(order_attn_func(f, g, b, V, 16)),
                                dense_order_attention(*(sub(t) for t in (f, g, b, V))), **TOL)
     _assert_grads([sub(x) for x in got], _grads(_rank_dense, [sub(t) for t in (f, g, b, V)], sub(dO)))
     del got
     gates = torch.randn(B, H, N, M, device=DEVICE, generator=gen)
     comps = [(f, g, b), (f.flip(2), g.flip(2), b.flip(2))]
     inputs = [gates, V] + [t for c in comps for t in c]
-    got = _grads(_mix_fn(mixture_attention_triton, 16), inputs, dO)
+    got = _grads(_mix_fn(mixture_attn_func, 16), inputs, dO)
     with torch.no_grad():
-        out_ng = _mix_fn(mixture_attention_triton, 16)(*inputs)
+        out_ng = _mix_fn(mixture_attn_func, 16)(*inputs)
     ref_in = [sub(t) for t in inputs]
     torch.testing.assert_close(sub(out_ng), _dense_mixture64(M)(*ref_in).float(), **TOL)
     _assert_grads([sub(x) for x in got], _grads(_dense_mixture64(M), ref_in, sub(dO)), names=_mix_names(M))
