@@ -291,6 +291,17 @@ def main():
                          "exact_key": (ek < 0.5).float().mean().item(), "exact_query": (eq < 0.5).float().mean().item(),
                          "retrieval_true_gate": retrieval(mk, mq, tk, tq, g_true),
                          "retrieval_probed_gate": retrieval(mk, mq, tk, tq, g_hat)}
+        # query-only probes: the shared probe is dominated by the (150x more numerous) keys, whose context differs
+        # from the query lines, so also fit the query time from the query positions alone
+        if Xq_f.shape[0] >= 200:
+            qprobes = {"ridge": ridge_fit(Xq_f, yq_f, [1e1, 1e2, 1e3, 1e4, 1e5], Xq_v, yq_v)[0],
+                       "mlp": mlp_fit(Xq_f, yq_f, Xq_v, yq_v), "digits": digit_fit(Xq_f, yq_f, Xq_v, yq_v)[0]}
+            for name, fn in qprobes.items():
+                tq = fn(Xq_v).cpu()
+                eq = (tq - yq_v.cpu()).abs()
+                res[name]["query_only_mae"] = eq.mean().item()
+                res[name]["query_only_exact"] = (eq < 0.5).float().mean().item()
+                res[name]["retrieval_true_gate_query_only"] = retrieval(mk, mq, probes[name](Xk_v).cpu(), tq, g_true)
         res["retrieval_true_times_true_gate"] = retrieval(mk, mq, yk_v.cpu(), yq_v.cpu(), g_true)
         res["retrieval_true_times_probed_gate"] = retrieval(mk, mq, yk_v.cpu(), yq_v.cpu(), g_hat)
         results["layers"][l] = res
@@ -299,6 +310,8 @@ def main():
               + "; ".join(f"{n}: key MAE {r['key_mae']:.0f} (tracked {r['key_mae_tracked']:.0f}, p90 {r['key_err_p90']:.0f}), "
                           f"query MAE {r['query_mae']:.0f}, exact key/query {r['exact_key']:.3f}/{r['exact_query']:.3f}, "
                           f"retrieval {r['retrieval_true_gate']:.3f} (probed gate {r['retrieval_probed_gate']:.3f})"
+                          + (f", query-only probe: MAE {r['query_only_mae']:.0f} exact {r['query_only_exact']:.3f} "
+                             f"retrieval {r['retrieval_true_gate_query_only']:.3f}" if "query_only_mae" in r else "")
                           for n, r in res.items() if isinstance(r, dict) and "key_mae" in r)
               + f"; true times: retrieval {res['retrieval_true_times_true_gate']:.3f} (probed gate "
               f"{res['retrieval_true_times_probed_gate']:.3f})", flush=True)

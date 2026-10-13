@@ -26,9 +26,9 @@ run() {
   srun --exclusive --ntasks=1 --gpus=1 --cpus-per-task=72 --mem=190G --uenv=pytorch/v2.9.1:v2 --view=default \
        bash -c "ulimit -c 0; $*" > "$log" 2>&1
 }
-run "$OUT/lane0.log" $PY --pos newline --fit-docs 64 &
-run "$OUT/lane1.log" $PY --pos newline --fit-docs 256 &
-run "$OUT/lane2.log" $PY --pos timedigit --fit-docs 64 &
-run "$OUT/lane3.log" $PY --pos timedigit --fit-docs 256 &
+run "$OUT/lane0.log" $PY --pos newline --fit-docs 256 &
+run "$OUT/lane1.log" $PY --pos newline --fit-docs 512 &
+run "$OUT/lane2.log" $PY --pos timedigit --fit-docs 256 &
+run "$OUT/lane3.log" $PY --pos timedigit --fit-docs 512 &
 wait
 grep -h "^layer\|^tracked\|^collected" "$OUT"/lane*.log
