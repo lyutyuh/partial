@@ -1,7 +1,7 @@
 """Benchmark the Triton causal order attention (learning/order_attention_triton.py), forward and forward + backward.
 
 One layer's attention output for B sequences, H heads, head dim d, for a single K = 2 order head per head (M = 1,
-``order_attention_triton``) and a gated mixture of M of them (``mixture_attention_triton``, sharing V): the Triton
+``order_attn_func``) and a gated mixture of M of them (``mixture_attn_func``, sharing V): the Triton
 kernels (chunk 64, and the ``--extra-chunks`` at the ``--extra-chunk-length``) against the torch position-tree
 ``order_attention`` / ``mixture_attention`` (up to ``--torch-max-len``; autograd through it for the backward, up to
 ``--torch-train-max-len``) and a standard causal dot-product head: PyTorch SDPA in fp32 (default dispatch) and in bf16
@@ -40,7 +40,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from learning.order_attention import mixture_attention, order_attention  # noqa: E402
 from learning.order_attention_triton import (  # noqa: E402
-    _order_attention_bwd, _order_attention_fwd, mixture_attention_triton, order_attention_triton,
+    _order_attn_backward, _order_attn_forward, mixture_attn_func, order_attn_func,
 )
 
 NAN = (float("nan"), float("nan"))
@@ -151,10 +151,10 @@ def bench(args, train):
                 for t in leaves:
                     t.requires_grad_()
             if M == 1:
-                tri = lambda c=args.chunk, V=V: order_attention_triton(*comps[0], V, c)  # noqa: E731
+                tri = lambda c=args.chunk, V=V: order_attn_func(*comps[0], V, c)  # noqa: E731
                 tree = lambda: order_attention(*comps[0], V, True, args.chunk)  # noqa: E731
             else:
-                tri = lambda c=args.chunk, V=V: mixture_attention_triton(gates, comps, V, c)  # noqa: E731
+                tri = lambda c=args.chunk, V=V: mixture_attn_func(gates, comps, V, c)  # noqa: E731
                 tree = lambda: mixture_attention(gates, comps, V, True, args.chunk)  # noqa: E731
             res = [guarded(_step(tri, leaves, dO, train), args.reps)]
             tmax = args.torch_train_max_len if train else args.torch_max_len
@@ -183,11 +183,11 @@ def bench(args, train):
 
 def _category(name):
     low = name.lower()
-    for kern, cat in [("_bwd_prep_kernel", "prep (Triton)"), ("_bwd_scan_kernel", "scan (Triton)"),
-                      ("_bwd_search_kernel", "search (Triton)"), ("_key_intra_kernel", "intra (Triton)"),
-                      ("_key_tree_kernel", "tree (Triton)"), ("_scan_kernel", "scan (Triton)"),
-                      ("_search_kernel", "search (Triton)"), ("_query_kernel", "query (Triton)"),
-                      ("_mix_sum_kernel", "mixture sum (Triton)")]:
+    for kern, cat in [("_bwd_preprocess_kernel", "prep (Triton)"), ("_bwd_scan_kernel", "scan (Triton)"),
+                      ("_bwd_search_kernel", "search (Triton)"), ("_bwd_intra_kernel", "intra (Triton)"),
+                      ("_bwd_tree_kernel", "tree (Triton)"), ("_fwd_scan_kernel", "scan (Triton)"),
+                      ("_fwd_search_kernel", "search (Triton)"), ("_fwd_kernel", "query (Triton)"),
+                      ("_mixture_sum_kernel", "mixture sum (Triton)")]:
         if kern in name:
             return cat
     if "sort" in low or "radix" in low:
@@ -225,11 +225,11 @@ def bench_breakdown(args):
     dO = torch.randn(B, H, n, d, device="cuda")
     glue = "glue (elementwise, pad, copies)"
     for chunk in [args.chunk] + [c for c in args.extra_chunks if c != args.chunk]:
-        _breakdown(lambda: _order_attention_fwd(f, g, b, V, chunk), args.reps,
+        _breakdown(lambda: _order_attn_forward(f, g, b, V, chunk), args.reps,
                    ["sorts (torch.sort)", "scan (Triton)", "search (Triton)", "query (Triton)", glue],
                    f"forward per-kernel breakdown, N={n} B={B} H={H} d={d} chunk={chunk} (GPU ms per call, profiler)")
-        saved = _order_attention_fwd(f, g, b, V, chunk)
-        _breakdown(lambda: _order_attention_bwd(f, g, b, V, *saved, dO, chunk), args.reps,
+        saved = _order_attn_forward(f, g, b, V, chunk)
+        _breakdown(lambda: _order_attn_backward(dO, f, g, b, V, *saved, chunk), args.reps,
                    ["prep (Triton)", "sorts (torch.sort)", "scan (Triton)", "search (Triton)", "intra (Triton)",
                     "tree (Triton)", glue],
                    f"backward per-kernel breakdown, N={n} B={B} H={H} d={d} chunk={chunk} (GPU ms per call, profiler)")
@@ -245,7 +245,7 @@ def bench_breakdown(args):
             for t in leaves:
                 t.grad = None
             with torch.enable_grad():
-                mixture_attention_triton(gates, comps, V, args.chunk).backward(dO)
+                mixture_attn_func(gates, comps, V, args.chunk).backward(dO)
         _breakdown(mix_step, args.reps,
                    ["prep (Triton)", "sorts (torch.sort)", "scan (Triton)", "search (Triton)", "query (Triton)",
                     "intra (Triton)", "tree (Triton)", "mixture sum (Triton)", glue],

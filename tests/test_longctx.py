@@ -66,7 +66,7 @@ def test_shift_invariance(scorer, dense):
     for shift in (0, 777):
         pos = torch.arange(N, device=DEVICE) + shift
         out, cs = st(h, pos), _cos_sin(model, pos)
-        outs.append(longctx.student_attend(st, out, V, cs, dense=dense))
+        outs.append(longctx.student_attention_forward(st, out, V, cs, dense=dense))
         lps.append(longctx.student_log_probs(st, out, causal, cs))
     torch.testing.assert_close(outs[0], outs[1], rtol=1e-4, atol=2e-4)
     torch.testing.assert_close(lps[0].exp(), lps[1].exp(), rtol=1e-4, atol=2e-4)
@@ -74,7 +74,7 @@ def test_shift_invariance(scorer, dense):
         with torch.no_grad():
             st.slope.zero_()
         pos = torch.arange(N, device=DEVICE)
-        flat = longctx.student_attend(st, st(h, pos), V, _cos_sin(model, pos), dense=dense)
+        flat = longctx.student_attention_forward(st, st(h, pos), V, _cos_sin(model, pos), dense=dense)
         assert (flat - outs[0]).abs().max() > 1e-2
 
 
@@ -90,8 +90,8 @@ def test_dense_log_probs_match_attention_path(scorer):
     causal = torch.ones(N, N, dtype=torch.bool, device=DEVICE).tril()
     out, cs = st(h, pos), _cos_sin(model, pos)
     ref = longctx.student_log_probs(st, out, causal, cs).exp() @ V
-    torch.testing.assert_close(longctx.student_attend(st, out, V, cs), ref, rtol=1e-4, atol=1e-5)
-    torch.testing.assert_close(longctx.student_attend(st, out, V, cs, dense=True), ref, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(longctx.student_attention_forward(st, out, V, cs), ref, rtol=1e-4, atol=1e-5)
+    torch.testing.assert_close(longctx.student_attention_forward(st, out, V, cs, dense=True), ref, rtol=1e-4, atol=1e-5)
 
 
 @pytest.mark.parametrize("D", [8, 128])
@@ -267,7 +267,7 @@ def test_triton_attend_matches_torch_path_and_grads(scorer):
     grads = {}
     for impl in ("torch", "triton"):
         st.zero_grad(set_to_none=True)
-        o = longctx.student_attend(st, st(h, pos), V, cs, impl=impl)
+        o = longctx.student_attention_forward(st, st(h, pos), V, cs, impl=impl)
         torch.testing.assert_close(o.detach(), ref, rtol=1e-4, atol=1e-5)
         (o * w).sum().backward()
         grads[impl] = [p.grad.clone() for p in st.parameters()]
