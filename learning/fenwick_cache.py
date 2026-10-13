@@ -48,6 +48,14 @@ Against the exact decode cache (``OrderCache``: rank-sorted blocks of sizes 2^l,
 memory) the quantised cache replaces the sort by cell indexing and the per-block searches by fixed-length index
 chains: 4 chains of <= log2(B) + 1 combines per token, 2 (B + 2)(d + 2) floats per head whatever N.
 
+Measured (scripts/bench_fenwick_cache.py, GH200, 16 order heads, d = 128, fp32 states, median of 200 decode steps,
+insert + query): the fused Triton step takes 0.034 / 0.044 / 0.054 ms at B = 256 / 4096 / 65536 for every context
+length from 4k to 128k (query alone 0.018-0.027 ms; cache 4.1 / 65 / 1040 MiB; prefill build 9-44 ms at 128k).
+``OrderCache`` (CUDA graph) steps in 0.086-0.094 ms with a p99 of 2.9 ms (binary-counter merges) and holds 123 MiB at
+4k, 3.9 GB at 128k; a bf16 GQA-8 KV cache for the same 16 query heads steps in 0.039 / 0.057 / 0.128 / 0.222 ms at
+4k / 16k / 64k / 128k with 16-512 MiB. The torch index chains are launch-bound (1.3-4.9 ms per step even from a CUDA
+graph) and serve as the reference for the kernel.
+
 Fenwick layout, per head, 1-indexed nodes 1..B: node i of tree 1 covers cells i - lowbit(i) .. i - 1 (0-indexed), node
 i of tree 2 the same range of the REVERSED index B - 1 - cell. Node 0 holds the identity state (m = -inf, S = 0), so an
 exhausted query chain reads "nothing"; node B + 1 is scratch and absorbs the writes of an exhausted update chain. A
