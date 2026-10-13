@@ -25,6 +25,37 @@ and a query reads one prefix and one suffix state per segment with a single batc
 token in a fixed number of kernel launches (or one CUDA-graph replay), instead of the O(N d) KV-cache dot product.
 Position order is the insertion order, so the causal mask costs nothing at decode time. ``OrderCacheSimple`` is the
 earlier block-list implementation, kept for comparison.
+
+Pseudo code (one head; key 0 is the sink with value v(0); a state is (m, S) with S = sum exp(logit - m) [v, 1];
+combine(A, B) rescales both states to max(m_A, m_B) and adds; shift((m, S), -f) = (m - f, S); normalise((m, S)) =
+S[:d] / S[d]):
+
+    rank r(y) = g1(y) - g2(y);  threshold a(x) = f1(x) - f2(x)
+    logit(x, y) = g1(y) - f1(x) if r(y) <= a(x) else g2(y) - f2(x)          # = g1 - f1 - relu(r - a)
+    out(x) = normalise(combine over keys y <= x of (logit(x, y), [v(y), 1]), and (b(x), [v(0), 1]))
+
+    exact, non-causal (one sort):
+        order the keys by rank: y_1 .. y_N
+        P[i] = combine(P[i-1], (g1(y_i), [v(y_i), 1]))                          # prefix states in rank order
+        Q[i] = combine(Q[i+1], (g2(y_i), [v(y_i), 1]))                          # suffix states
+        for each query x:
+            i = #{y : r(y) <= a(x)}                                              # binary search in the sorted ranks
+            out(x) = normalise(combine(shift(P[i], -f1(x)), shift(Q[i+1], -f2(x)), (b(x), [v(0), 1])))
+
+    exact, causal prefill (``order_attention``; the Triton kernels implement the same):
+        cut the positions into chunks of C keys; the keys of the chunks c' < c are covered by one dyadic block per
+        set bit of c (the binary decomposition of the prefix [0, c))
+        for each dyadic block: sort its keys by rank and build P / Q as above                 # the "levels"
+        for each query x in chunk c:
+            for each dyadic block of [0, c): i = #{keys of the block with r <= a(x)}; combine shifted P[i], Q[i+1]
+            combine the keys of chunk c at positions <= x densely (one C x C tile) and the sink; normalise
+
+    exact decode (``OrderCache``, logarithmic method):
+        cache = one static rank-sorted block (the prompt) + sorted tail blocks of sizes 2^l (a binary counter)
+        step(x): insert key x by carrying into the lowest empty tail level (re-sort + re-scan 2^j keys)
+                 query: per block, binary search a(x), gather P[i] / Q[i+1], combine; + sink; normalise
+        O(log N) searches per token, amortised O(log N) rebuilt keys, memory O(N d)
+        (``learning/fenwick_cache``: the same with quantised ranks, O(log B) per token and memory independent of N)
 """
 import logging
 import math
