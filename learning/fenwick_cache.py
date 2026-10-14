@@ -265,6 +265,7 @@ class OrderFenwickCache:
         self.edges = self.edges.contiguous()
         self._out = torch.empty((num_heads, head_dim), device=device)
         self._out_idx = torch.empty((num_heads,), device=device)
+        self._next_pos = torch.zeros((), device=device)  # position of the next key, kept on the device (no copies)
         self._graphs.clear()
         if self.cuda_graph and device.type == "cuda":
             self._f_in = torch.zeros((num_heads, 2), device=device)
@@ -288,6 +289,7 @@ class OrderFenwickCache:
         self._alloc(num_heads, head_dim, value.device)
         self.v0 = value[:, 0].contiguous()  # the kernel reads it as (H, d + 1) contiguous
         self.n = seq_len
+        self._next_pos.fill_(seq_len)
         if seq_len > 1:
             self._build(g[:, 1:], value[:, 1:])
 
@@ -387,7 +389,9 @@ class OrderFenwickCache:
             self.prefill(g.unsqueeze(1), v.unsqueeze(1))
             self._out_idx.zero_()
             return v.clone()
-        v = _payload(v, torch.tensor(self.n, device=v.device), self.semiring)  # the new key's position is n
+        v = _payload(v, self._next_pos, self.semiring)  # the new key's position is n
+        if self.semiring == "max":
+            self._next_pos += 1
         self.n += 1
         if self.impl == "triton" and f.is_cuda:
             return self._launch(f, g, b, v, update=True)
