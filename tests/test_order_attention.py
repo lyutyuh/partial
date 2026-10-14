@@ -13,8 +13,8 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from learning.order_attention import (  # noqa: E402
-    OrderCache, OrderCacheSimple, _scan_tree, _sortkey, chunk_scan, chunk_scan_suffix, dense_order_attention,
-    mixture_attention, order_attention,
+    OrderCache, OrderCacheSimple, _scan_tree, _sortkey, argmax_scan, argmax_select, chunk_scan, chunk_scan_suffix,
+    dense_order_attention, eager_order_attention_forward, mixture_attention, order_attention, order_attention_argmax,
 )
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -230,3 +230,58 @@ def test_order_cache_graphs_share_one_pool():
         pools.setdefault(cache.folds, set()).update(graph.pool() for graph, _ in cache._graphs.values())
     assert cache.folds == 1 and len(cache._graphs) == 1 + 6  # query graph + step graphs of levels 0..5
     assert len(pools[0]) == 1 and len(pools[1]) == 1 and pools[0] != pools[1]
+
+
+def _argmax_reference(f, g, b, V, causal=True, rank=None, threshold=None):
+    """Winner positions of the max semiring from the eager one-hot weights."""
+    _, weights = eager_order_attention_forward(f, g, b, V, causal, rank, threshold, semiring="max")
+    return weights.argmax(dim=-1)
+
+
+@pytest.mark.parametrize("B,H,N,d,causal", [(1, 2, 1, 4, True), (2, 3, 9, 4, True), (2, 2, 70, 8, True),
+                                            (1, 3, 257, 5, True), (2, 2, 40, 8, False), (1, 2, 130, 3, False)])
+def test_max_semiring_tree_matches_eager(B, H, N, d, causal):
+    """Hard order attention through the position tree: the winner and its value equal the eager argmax."""
+    f, g, b, V = _inputs(N * 5 + H, B, H, N, d)
+    out = order_attention(f, g, b, V, causal, 8, semiring="max")
+    torch.testing.assert_close(out, dense_order_attention(f, g, b, V, causal, semiring="max"), rtol=0, atol=0)
+    best, index = order_attention_argmax(f, g, b, causal)
+    assert torch.equal(index, _argmax_reference(f, g, b, V, causal))
+    scores = (g.unsqueeze(2) - f.unsqueeze(3)).amin(-1)
+    scores = torch.cat([b.unsqueeze(-1), scores[..., 1:]], -1)
+    if causal:
+        scores = scores.masked_fill(~torch.ones(N, N, dtype=torch.bool, device=DEVICE).tril(), float("-inf"))
+    torch.testing.assert_close(best, scores.amax(-1), rtol=0, atol=0)
+
+
+def test_max_semiring_ties_masks_and_branch_keys():
+    """Ties go to the later key, masked keys never win, the sink wins only strictly, and explicit integer branch keys
+    far beyond fp32's resolution of g1 - g2 are honoured."""
+    B, H, N, d = 1, 2, 48, 3
+    f, g, b, V = _inputs(11, B, H, N, d)
+    g[:, :, 10:20] = 100.0  # ten identical dominant keys: the last visible one wins
+    g[:, :, 30:34] = float("-inf")
+    b[:, :, 5] = float("inf")  # a query that must take the sink
+    out = order_attention(f, g, b, V, True, 8, semiring="max")
+    torch.testing.assert_close(out, dense_order_attention(f, g, b, V, True, semiring="max"), rtol=0, atol=0)
+    _, index = order_attention_argmax(f, g, b, True)
+    assert torch.equal(index, _argmax_reference(f, g, b, V))
+    assert index[0, :, 5].tolist() == [0, 0] and index[0, 0, 25] == 19 and index[0, 1, 14] == 14
+    gen = torch.Generator().manual_seed(3)
+    rank = torch.randint(0, 1 << 24, (B, H, N), generator=gen).float().to(DEVICE)
+    threshold = torch.randint(0, 1 << 24, (B, H, N), generator=gen).float().to(DEVICE)
+    _, index = order_attention_argmax(f, g, b, True, rank=rank, threshold=threshold)
+    assert torch.equal(index, _argmax_reference(f, g, b, V, True, rank, threshold))
+    g_all = torch.full_like(g, float("-inf"))
+    _, index = order_attention_argmax(f, g_all, torch.full_like(b, float("-inf")), True)
+    assert int(index.max()) == 0  # nothing finite: the sink
+
+
+def test_argmax_scan_and_select():
+    logw = torch.tensor([[1.0, 3.0, 3.0, float("-inf"), 2.0]])
+    index = torch.tensor([[7, 3, 9, 1, 4]])
+    m, idx = argmax_scan(logw, index)
+    assert m.tolist() == [[1.0, 3.0, 3.0, 3.0, 3.0]] and idx.tolist() == [[7, 3, 9, 9, 9]]
+    m, idx = argmax_select(torch.tensor([2.0, float("-inf")]), torch.tensor([5, 0]), torch.tensor([2.0, float("-inf")]),
+                           torch.tensor([3, 8]))
+    assert m.tolist() == [2.0, float("-inf")] and idx.tolist() == [5, 0]

@@ -50,6 +50,10 @@ S[:d] / S[d]):
             for each dyadic block of [0, c): i = #{keys of the block with r <= a(x)}; combine shifted P[i], Q[i+1]
             combine the keys of chunk c at positions <= x densely (one C x C tile) and the sink; normalise
 
+    max semiring (``semiring="max"``, ``order_attention_argmax``): the same algorithms with the state (m, S) replaced
+        by (best logit, key position), combine = keep the larger logit (ties: the later key), shift unchanged, and
+        the output the winner's value or position (the head). No exp, so no dynamic range; no normaliser channel.
+
     exact decode (``OrderCache``, logarithmic method):
         cache = one static rank-sorted block (the prompt) + sorted tail blocks of sizes 2^l (a binary counter)
         step(x): insert key x by carrying into the lowest empty tail level (re-sort + re-scan 2^j keys)
@@ -59,7 +63,7 @@ S[:d] / S[d]):
 """
 import logging
 import math
-from typing import Callable, Optional, Sequence
+from typing import Callable, Literal, Optional, Sequence
 
 import torch
 
@@ -69,6 +73,17 @@ NEG = float("-inf")
 
 Component = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 """One K = 2 order head: (f, g, b) realizers and sink logits."""
+
+Semiring = Literal["logsumexp", "max"]
+"""How the scores of the visible keys are aggregated: softmax-weighted mean (log-sum-exp semiring) or the single
+best key (max semiring: hard attention, the index of the winner is returned alongside its value)."""
+
+INDEX_BITS = 24  # key positions below 2^24 pack with a rank sort key into one int64 (max-semiring scans)
+
+
+def _check_semiring(semiring: str) -> None:
+    if semiring not in ("logsumexp", "max"):
+        raise ValueError(f"semiring must be 'logsumexp' or 'max', got {semiring!r}")
 
 
 def _sortkey(x: torch.Tensor) -> torch.Tensor:
@@ -89,6 +104,29 @@ def online_softmax_combine(
     w_a = torch.where(m_a == NEG, 0.0, torch.exp(torch.where(m_a == NEG, 0.0, m_a) - m_s))
     w_b = torch.where(m_b == NEG, 0.0, torch.exp(torch.where(m_b == NEG, 0.0, m_b) - m_s))
     return m, S_a * w_a + S_b * w_b
+
+
+def argmax_select(
+    m_a: torch.Tensor, idx_a: torch.Tensor, m_b: torch.Tensor, idx_b: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Max-semiring combine of two candidates (logit, key position): the larger logit wins, ties go to the later key;
+    a -inf candidate never wins. (-inf, 0) is the identity (0 = the sink)."""
+    take_b = (m_b > m_a) | ((m_b == m_a) & (idx_b > idx_a) & (m_b > NEG))
+    return torch.where(take_b, m_b, m_a), torch.where(take_b, idx_b, idx_a)
+
+
+def argmax_scan(logw: torch.Tensor, index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Inclusive prefix argmax along the last dim: m[i] = max_{j <= i} logw[j] and the ``index`` of the key attaining
+    it (ties: the larger index). One int64 cummax over the packed (rank sort key, index) pairs."""
+    packed = (_sortkey(logw) << INDEX_BITS) | index
+    best = torch.cummax(packed, dim=-1).indices
+    return logw.gather(-1, best), index.gather(-1, best)
+
+
+def argmax_scan_suffix(logw: torch.Tensor, index: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Inclusive suffix argmax: m[i] = max_{j >= i} logw[j] and its index."""
+    m, idx = argmax_scan(logw.flip(-1), index.flip(-1))
+    return m.flip(-1), idx.flip(-1)
 
 
 def chunk_scan(logw: torch.Tensor, value: torch.Tensor, chunk: int = 64) -> tuple[torch.Tensor, torch.Tensor]:
@@ -165,8 +203,102 @@ def _sort_within_blocks(rank: torch.Tensor, block_size: int, seqlen: int) -> tup
     return composite.sort(dim=-1)
 
 
+def _padded_order_inputs(
+    f: torch.Tensor, g: torch.Tensor, rank: Optional[torch.Tensor], threshold: Optional[torch.Tensor]
+) -> tuple:
+    """Realizers, branch keys and masks padded to a power-of-two length (shared by both semirings)."""
+    batch, num_heads, seq_len, _ = f.shape
+    seqlen_padded = 1 << max(seq_len - 1, 0).bit_length()
+    pad = seqlen_padded - seq_len
+    f_pad = torch.nn.functional.pad(f.float(), (0, 0, 0, pad))
+    g_pad = torch.nn.functional.pad(g.float(), (0, 0, 0, pad))
+    pos = torch.arange(seqlen_padded, device=f.device)
+    is_key = (pos >= 1) & (pos < seq_len)  # the sink (0) and padding never enter the order structure
+    krank = g_pad[..., 0] - g_pad[..., 1] if rank is None else torch.nn.functional.pad(rank.float(), (0, pad))
+    krank = torch.where(is_key, krank, float("inf"))  # padding sorts last
+    krank = torch.where(pos == 0, NEG, krank)  # sink sorts first with zero weight
+    qthr = f_pad[..., 0] - f_pad[..., 1] if threshold is None else torch.nn.functional.pad(threshold.float(), (0, pad))
+    logw1 = torch.where(is_key, g_pad[..., 0], NEG)
+    logw2 = torch.where(is_key, g_pad[..., 1], NEG)
+    return f_pad, g_pad, krank, qthr, logw1, logw2, pos, seqlen_padded, pad
+
+
+def _level_splits(
+    composite: torch.Tensor, qthr: torch.Tensor, level: int, pos: torch.Tensor, seqlen_padded: int, causal: bool
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """For every query: the rows of the last branch-1 and first branch-2 key of its level-``level`` block, and whether
+    each exists (``has1``, ``has2``)."""
+    block_size = 1 << level
+    n = pos + 1  # the past of query x is [0, x]
+    if causal:
+        has = ((n >> level) & 1) == 1
+        start = (n >> (level + 1)) << (level + 1)
+    else:
+        has = torch.ones(seqlen_padded, dtype=torch.bool, device=pos.device)
+        start = torch.zeros(seqlen_padded, dtype=torch.int64, device=pos.device)
+    qkey = ((start // block_size) << 32) | _sortkey(qthr)
+    split = torch.searchsorted(composite, qkey, right=True) - start  # keys of the block with rank <= a(x)
+    row1 = (start + split - 1).clamp(min=0)
+    row2 = (start + split).clamp(max=seqlen_padded - 1)
+    return row1, row2, has & (split > 0), has & (split < block_size)
+
+
+def order_attention_argmax(
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    causal: bool = True,
+    chunk: int = 64,
+    rank: Optional[torch.Tensor] = None,
+    threshold: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Max-semiring order attention: the best score of every query and the position of the key attaining it.
+
+    The same position tree as ``order_attention`` with prefix / suffix argmax scans in place of the online-softmax
+    scans; ties go to the later key, the sink is position 0 and wins only by a strictly larger logit. No exp is taken,
+    so realizers and branch keys of any magnitude are compared exactly.
+
+    Args:
+        f, g, b, causal: as in ``order_attention``.
+        chunk: unused (kept for signature parity with ``order_attention``).
+        rank, threshold: optional explicit branch keys, as in ``eager_order_attention_forward``.
+
+    Returns:
+        best (batch, num_heads, seq_len) the maximal logit of every query, and index (batch, num_heads, seq_len) int64
+        the key position attaining it (0 = sink).
+    """
+    batch, num_heads, seq_len, _ = f.shape
+    f_pad, g_pad, krank, qthr, logw1, logw2, pos, seqlen_padded, pad = _padded_order_inputs(f, g, rank, threshold)
+    if seqlen_padded >= 1 << INDEX_BITS:
+        raise ValueError(f"max-semiring scans pack positions into {INDEX_BITS} bits; seq_len {seq_len} is too long")
+    levels = range(int(math.log2(seqlen_padded)) + 1) if causal else [int(math.log2(seqlen_padded))]
+    best_m = torch.full((batch, num_heads, seqlen_padded), NEG, device=f.device)
+    best_i = torch.zeros((batch, num_heads, seqlen_padded), dtype=torch.int64, device=f.device)
+    for level in levels:
+        block_size = 1 << level
+        composite, perm = _sort_within_blocks(krank, block_size, seqlen_padded)  # perm = key positions
+        shape = (batch, num_heads, seqlen_padded // block_size, block_size)
+        m1, i1 = argmax_scan(logw1.gather(-1, perm).view(shape), perm.view(shape))
+        m2, i2 = argmax_scan_suffix(logw2.gather(-1, perm).view(shape), perm.view(shape))
+        m1, i1, m2, i2 = (t.reshape(batch, num_heads, seqlen_padded) for t in (m1, i1, m2, i2))
+        row1, row2, has1, has2 = _level_splits(composite, qthr, level, pos, seqlen_padded, causal)
+        cand1 = torch.where(has1, m1.gather(-1, row1) - f_pad[..., 0], NEG)
+        cand2 = torch.where(has2, m2.gather(-1, row2) - f_pad[..., 1], NEG)
+        best_m, best_i = argmax_select(best_m, best_i, cand1, i1.gather(-1, row1))
+        best_m, best_i = argmax_select(best_m, best_i, cand2, i2.gather(-1, row2))
+    b_pad = torch.nn.functional.pad(b.float(), (0, pad))
+    best_m, best_i = argmax_select(best_m, best_i, b_pad, torch.zeros_like(best_i))
+    return best_m[:, :, :seq_len], best_i[:, :, :seq_len]
+
+
 def order_attention(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, value: torch.Tensor, causal: bool = True, chunk: int = 64
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    value: torch.Tensor,
+    causal: bool = True,
+    chunk: int = 64,
+    semiring: Semiring = "logsumexp",
 ) -> torch.Tensor:
     """Softmax(order scores) @ value without the N x N matrix (a position tree of chunk scans).
 
@@ -178,25 +310,20 @@ def order_attention(
         value: (batch, num_heads, seq_len, head_dim) values.
         causal: key y is visible to query x iff y <= x. If False every key is visible to every query.
         chunk: chunk size of the scans.
+        semiring: "logsumexp" (softmax-weighted mean) or "max" (the value of the best key, see
+            ``order_attention_argmax``).
 
     Returns:
         (batch, num_heads, seq_len, head_dim) attention output, identical to ``dense_order_attention``.
     """
+    _check_semiring(semiring)
+    if semiring == "max":
+        _, index = order_attention_argmax(f, g, b, causal, chunk)
+        return value.float().gather(-2, index.unsqueeze(-1).expand(-1, -1, -1, value.shape[-1]))
     batch, num_heads, seq_len, _ = f.shape
     head_dim = value.shape[-1]
-    seqlen_padded = 1 << max(seq_len - 1, 0).bit_length()
-    pad = seqlen_padded - seq_len
-    f_pad = torch.nn.functional.pad(f.float(), (0, 0, 0, pad))
-    g_pad = torch.nn.functional.pad(g.float(), (0, 0, 0, pad))
+    f_pad, g_pad, rank, qrank, logw1, logw2, pos, seqlen_padded, pad = _padded_order_inputs(f, g, None, None)
     v_pad = _append_ones(torch.nn.functional.pad(value.float(), (0, 0, 0, pad)))
-    pos = torch.arange(seqlen_padded, device=f.device)
-    is_key = (pos >= 1) & (pos < seq_len)  # the sink (0) and padding never enter the order structure
-    rank = torch.where(is_key, g_pad[..., 0] - g_pad[..., 1], float("inf"))  # padding sorts last
-    rank = torch.where(pos == 0, NEG, rank)  # sink sorts first with zero weight
-    logw1 = torch.where(is_key, g_pad[..., 0], NEG)
-    logw2 = torch.where(is_key, g_pad[..., 1], NEG)
-    qrank = f_pad[..., 0] - f_pad[..., 1]
-    n = pos + 1  # the past of query x is [0, x]
     levels = range(int(math.log2(seqlen_padded)) + 1) if causal else [int(math.log2(seqlen_padded))]
     m_acc = torch.full((batch, num_heads, seqlen_padded, 1), NEG, device=f.device)
     S_acc = torch.zeros((batch, num_heads, seqlen_padded, head_dim + 1), device=f.device)
@@ -212,19 +339,7 @@ def order_attention(
         S1 = S1.reshape(batch, num_heads, seqlen_padded, head_dim + 1)
         m2 = m2.reshape(batch, num_heads, seqlen_padded, 1)
         S2 = S2.reshape(batch, num_heads, seqlen_padded, head_dim + 1)
-        if causal:
-            has = ((n >> level) & 1) == 1
-            start = (n >> (level + 1)) << (level + 1)
-        else:
-            has = torch.ones(seqlen_padded, dtype=torch.bool, device=f.device)
-            start = torch.zeros(seqlen_padded, dtype=torch.int64, device=f.device)
-        block = start // block_size
-        qkey = (block << 32) | _sortkey(qrank)
-        split = torch.searchsorted(composite, qkey, right=True) - start  # keys of the block with rank <= a(x)
-        row1 = (start + split - 1).clamp(min=0)
-        row2 = (start + split).clamp(max=seqlen_padded - 1)
-        has1 = has & (split > 0)
-        has2 = has & (split < block_size)
+        row1, row2, has1, has2 = _level_splits(composite, qrank, level, pos, seqlen_padded, causal)
         logit1 = torch.where(has1.unsqueeze(-1), m1.gather(-2, row1.unsqueeze(-1)) - f_pad[..., :1], NEG)
         logit2 = torch.where(has2.unsqueeze(-1), m2.gather(-2, row2.unsqueeze(-1)) - f_pad[..., 1:2], NEG)
         m_acc, S_acc = online_softmax_combine(
@@ -248,6 +363,7 @@ def eager_order_attention_forward(
     causal: bool = True,
     rank: Optional[torch.Tensor] = None,
     threshold: Optional[torch.Tensor] = None,
+    semiring: Semiring = "logsumexp",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """O(N^2) reference in the style of ``eager_attention_forward``: explicit logits, mask, softmax @ value.
 
@@ -256,10 +372,13 @@ def eager_order_attention_forward(
         causal: mask keys y > x.
         rank, threshold: optional (batch, num_heads, seq_len) branch keys replacing g1 - g2 and f1 - f2: y scores
             g1(y) - f1(x) iff rank(y) <= threshold(x), else g2(y) - f2(x) (the min form when they are the defaults).
+        semiring: "logsumexp" (softmax) or "max" (one-hot on the best key; ties to the later key, the sink when
+            every score is -inf).
 
     Returns:
         attn_output (batch, num_heads, seq_len, head_dim) and attn_weights (batch, num_heads, seq_len, seq_len).
     """
+    _check_semiring(semiring)
     f, g, value = f.float(), g.float(), value.float()
     if rank is None and threshold is None:
         scores = (g.unsqueeze(2) - f.unsqueeze(3)).amin(dim=-1)  # (batch, num_heads, x, y): min_k g_k(y) - f_k(x)
@@ -272,16 +391,30 @@ def eager_order_attention_forward(
     if causal:
         seq_len = scores.shape[-1]
         scores = scores.masked_fill(~torch.ones(seq_len, seq_len, dtype=torch.bool, device=scores.device).tril(), NEG)
-    attn_weights = torch.softmax(scores, dim=-1)
+    attn_weights = torch.softmax(scores, dim=-1) if semiring == "logsumexp" else argmax_weights(scores)
     attn_output = attn_weights @ value
     return attn_output, attn_weights
 
 
+def argmax_weights(scores: torch.Tensor) -> torch.Tensor:
+    """One-hot attention weights of the max semiring: the last maximal key (ties go to the later key), or the sink
+    (key 0) when every score is -inf."""
+    n = scores.shape[-1]
+    index = n - 1 - scores.flip(-1).argmax(dim=-1)
+    index = torch.where(scores.amax(dim=-1) > NEG, index, torch.zeros_like(index))
+    return torch.nn.functional.one_hot(index, n).to(scores.dtype)
+
+
 def dense_order_attention(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, value: torch.Tensor, causal: bool = True
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    value: torch.Tensor,
+    causal: bool = True,
+    semiring: Semiring = "logsumexp",
 ) -> torch.Tensor:
     """O(N^2) reference: the attention output of ``eager_order_attention_forward``."""
-    return eager_order_attention_forward(f, g, b, value, causal)[0]
+    return eager_order_attention_forward(f, g, b, value, causal, semiring=semiring)[0]
 
 
 def mixture_attention(

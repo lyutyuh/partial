@@ -51,6 +51,10 @@ of ``learning/order_attention``):
         selected branches exactly as in the exact model, the cells carry no gradient. The decode cache above reproduces
         this forward token by token.
 
+    max semiring (``semiring="max"``): node = (best logit, [v, position]) of its cells, combine = keep the larger
+        logit (ties: the later key), the output is the winner's value and ``last_argmax`` its position (0 = sink).
+        No exp and no normaliser: integer codes of any magnitude compare exactly.
+
 Against the exact decode cache (``OrderCache``: rank-sorted blocks of sizes 2^l, a binary search per block, O(N d)
 memory) the quantised cache replaces the sort by cell indexing and the per-block searches by fixed-length index
 chains: 4 chains of <= log2(B) + 1 combines per token, 2 (B + 2)(d + 2) floats per head whatever N.
@@ -75,7 +79,9 @@ from typing import Callable, Optional
 
 import torch
 
-from learning.order_attention import NEG, _append_ones, online_softmax_combine
+from learning.order_attention import (
+    NEG, Semiring, _append_ones, _check_semiring, argmax_weights, online_softmax_combine,
+)
 
 try:
     import triton
@@ -116,29 +122,66 @@ def rank_cells(edges: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
 
 
 # --------------------------------------------------------------------------------------------------------- states
-def _cell_states(cells: torch.Tensor, logw: torch.Tensor, value: torch.Tensor, num_cells: int) -> torch.Tensor:
-    """Online-softmax state [S, m] per cell: m = max logw over the cell's keys, S = sum exp(logw - m) value.
+Combine = Callable[[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
+
+
+def select_combine(
+    m_a: torch.Tensor, S_a: torch.Tensor, m_b: torch.Tensor, S_b: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Max-semiring combine of (logit, payload [v, position]) states: the larger logit wins, ties go to the later
+    position, a -inf state never wins. (-inf, 0) is the identity."""
+    idx_a, idx_b = S_a[..., -1:], S_b[..., -1:]
+    take_b = (m_b > m_a) | ((m_b == m_a) & (idx_b > idx_a) & (m_b > NEG))
+    return torch.where(take_b, m_b, m_a), torch.where(take_b, S_b, S_a)
+
+
+def _combine_of(semiring: str) -> Combine:
+    return online_softmax_combine if semiring == "logsumexp" else select_combine
+
+
+def _payload(value: torch.Tensor, positions: Optional[torch.Tensor], semiring: str) -> torch.Tensor:
+    """[v, 1] (the normaliser channel) or [v, position] (the winner's identity) appended to the values (..., d)."""
+    if semiring == "logsumexp":
+        return _append_ones(value)
+    return torch.cat([value, positions.to(value.dtype).expand(*value.shape[:-1]).unsqueeze(-1)], dim=-1)
+
+
+def _cell_states(
+    cells: torch.Tensor, logw: torch.Tensor, payload: torch.Tensor, num_cells: int, semiring: str = "logsumexp"
+) -> torch.Tensor:
+    """Per-cell state [S, m]: the online-softmax sum of the cell's keys (log-sum-exp), or its best key (max).
 
     Args:
         cells: (num_heads, n) cell of each key.
         logw: (num_heads, n) log weight of each key (-inf = masked).
-        value: (num_heads, n, width) augmented values.
+        payload: (num_heads, n, width) augmented values [v, 1] or [v, position].
         num_cells: B.
+        semiring: "logsumexp" or "max".
 
     Returns:
         (num_heads, B, width + 1); empty cells hold the identity (S = 0, m = -inf).
     """
-    num_heads, _, width = value.shape
-    m = torch.full((num_heads, num_cells), NEG, device=value.device)
+    num_heads, _, width = payload.shape
+    m = torch.full((num_heads, num_cells), NEG, device=payload.device)
     m = m.scatter_reduce(1, cells, logw, reduce="amax", include_self=True)
     m_at = m.gather(1, cells)
-    w = torch.where(logw == NEG, 0.0, torch.exp(logw - torch.where(m_at == NEG, 0.0, m_at)))
-    S = torch.zeros((num_heads, num_cells, width), device=value.device)
-    S.scatter_add_(1, cells.unsqueeze(-1).expand(-1, -1, width), w.unsqueeze(-1) * value)
+    if semiring == "logsumexp":
+        w = torch.where(logw == NEG, 0.0, torch.exp(logw - torch.where(m_at == NEG, 0.0, m_at)))
+        S = torch.zeros((num_heads, num_cells, width), device=payload.device)
+        S.scatter_add_(1, cells.unsqueeze(-1).expand(-1, -1, width), w.unsqueeze(-1) * payload)
+    else:  # the winner of a cell: among its maximal finite keys, the one with the largest position
+        cand = torch.where((logw == m_at) & (logw > NEG), payload[..., -1], -1.0)
+        best = torch.full((num_heads, num_cells), -1.0, device=payload.device)
+        best = best.scatter_reduce(1, cells, cand, reduce="amax", include_self=True)
+        order = torch.arange(payload.shape[1], device=payload.device).expand(num_heads, -1)
+        winner = torch.full((num_heads, num_cells), -1, dtype=torch.long, device=payload.device)
+        winner = winner.scatter_reduce(1, cells, torch.where(cand == best.gather(1, cells), order, -1), reduce="amax")
+        rows = payload.gather(1, winner.clamp(min=0).unsqueeze(-1).expand(-1, -1, width))
+        S = torch.where((winner >= 0).unsqueeze(-1), rows, 0.0)
     return torch.cat([S, m.unsqueeze(-1)], dim=-1)
 
 
-def _fenwick_build_(tree: torch.Tensor, num_cells: int) -> None:
+def _fenwick_build_(tree: torch.Tensor, num_cells: int, combine: Combine = online_softmax_combine) -> None:
     """In place, from leaves at nodes 1..B (one per cell): node i += node j for every j with j + lowbit(j) = i.
 
     Processed by lowbit level (1, 2, 4, ...): a node receives only from lower levels and sends only to higher ones, so
@@ -151,7 +194,7 @@ def _fenwick_build_(tree: torch.Tensor, num_cells: int) -> None:
             break
         src = torch.arange(step, stop, 2 * step, device=tree.device)
         dst = src + step
-        m, S = online_softmax_combine(tree[:, dst, -1:], tree[:, dst, :-1], tree[:, src, -1:], tree[:, src, :-1])
+        m, S = combine(tree[:, dst, -1:], tree[:, dst, :-1], tree[:, src, -1:], tree[:, src, :-1])
         tree[:, dst] = torch.cat([S, m], dim=-1)
 
 
@@ -164,15 +207,22 @@ class OrderFenwickCache:
         cuda_graph: replay ``step`` and ``query`` from CUDA graphs captured lazily (CUDA only; the torch path).
         impl: "torch" (vectorised index chains, log B kernel launches per chain) or "triton" (one fused launch per
             step: cell search, both updates, both prefix chains, sink and normalisation; CUDA only).
+        semiring: "logsumexp" (softmax-weighted mean; node rows [S, m] with S = sum exp(g - m) [v, 1]) or "max"
+            (the best key; rows [v, position, m]; ``last_argmax`` holds the winners' positions after each query).
     """
 
-    def __init__(self, edges: torch.Tensor, cuda_graph: bool = False, impl: str = "torch"):
+    def __init__(
+        self, edges: torch.Tensor, cuda_graph: bool = False, impl: str = "torch", semiring: Semiring = "logsumexp"
+    ):
         edges = edges.float()
         if impl not in ("torch", "triton"):
             raise ValueError(f"impl must be 'torch' or 'triton', got {impl!r}")
         if impl == "triton" and triton is None:
             raise RuntimeError("impl='triton' needs Triton")
+        _check_semiring(semiring)
         self.impl = impl
+        self.semiring = semiring
+        self.combine = _combine_of(semiring)
         if edges.dim() not in (1, 2) or edges.shape[-1] < 1:
             raise ValueError(f"edges must be (B - 1,) or (H, B - 1) with B >= 2, got {tuple(edges.shape)}")
         if not bool((edges[..., 1:] >= edges[..., :-1]).all()):
@@ -194,6 +244,11 @@ class OrderFenwickCache:
         """Cell index of ranks or thresholds (H, n) -> (H, n) int64."""
         return rank_cells(self.edges, values)
 
+    @property
+    def last_argmax(self) -> Optional[torch.Tensor]:
+        """(H,) int64 positions of the winners of the last step or query (max semiring; 0 = the sink)."""
+        return None if self.tree1 is None else self._out_idx.long()
+
     def nbytes(self) -> int:
         """Bytes of the two trees (independent of the number of tokens)."""
         return 0 if self.tree1 is None else 2 * self.tree1.numel() * 4
@@ -209,6 +264,7 @@ class OrderFenwickCache:
         self._heads = torch.arange(num_heads, device=device)
         self.edges = self.edges.contiguous()
         self._out = torch.empty((num_heads, head_dim), device=device)
+        self._out_idx = torch.empty((num_heads,), device=device)
         self._graphs.clear()
         if self.cuda_graph and device.type == "cuda":
             self._f_in = torch.zeros((num_heads, 2), device=device)
@@ -225,9 +281,11 @@ class OrderFenwickCache:
             g: (H, N, 2) key realizers of positions 0..N-1 (0 = sink).
             value: (H, N, d) values.
         """
-        g, value = g.float(), _append_ones(value.float())
-        num_heads, seq_len, width = value.shape
-        self._alloc(num_heads, width - 1, value.device)
+        g, value = g.float(), value.float()
+        num_heads, seq_len, head_dim = value.shape
+        positions = torch.arange(seq_len, device=value.device)
+        value = _payload(value, positions, self.semiring)
+        self._alloc(num_heads, head_dim, value.device)
         self.v0 = value[:, 0].contiguous()  # the kernel reads it as (H, d + 1) contiguous
         self.n = seq_len
         if seq_len > 1:
@@ -237,10 +295,10 @@ class OrderFenwickCache:
         """Leaves from the per-cell states of the keys, then one O(B) bottom-up pass per tree."""
         B = self.num_cells
         cells = self.cells(g[..., 0] - g[..., 1])
-        self.tree1[:, 1 : B + 1] = _cell_states(cells, g[..., 0], value, B)  # node c + 1 holds cell c
-        self.tree2[:, 1 : B + 1] = _cell_states(cells, g[..., 1], value, B).flip(1)  # node B - c holds cell c
-        _fenwick_build_(self.tree1, B)
-        _fenwick_build_(self.tree2, B)
+        self.tree1[:, 1 : B + 1] = _cell_states(cells, g[..., 0], value, B, self.semiring)  # node c + 1 = cell c
+        self.tree2[:, 1 : B + 1] = _cell_states(cells, g[..., 1], value, B, self.semiring).flip(1)  # node B - c
+        _fenwick_build_(self.tree1, B, self.combine)
+        _fenwick_build_(self.tree2, B, self.combine)
 
     # ------------------------------------------------------------------------------------------------ chains
     def _prefix(self, tree: torch.Tensor, start: torch.Tensor, shift: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -251,7 +309,7 @@ class OrderFenwickCache:
         idx = start
         for _ in range(self.num_steps):
             node = tree[self._heads, idx]  # node 0 is the identity: an exhausted chain adds nothing
-            m, S = online_softmax_combine(m, S, node[:, -1:] - shift, node[:, :-1])
+            m, S = self.combine(m, S, node[:, -1:] - shift, node[:, :-1])
             idx = idx - (idx & -idx)
         return m, S
 
@@ -260,7 +318,7 @@ class OrderFenwickCache:
         idx = start
         for _ in range(self.num_steps):
             node = tree[self._heads, idx]
-            m, S = online_softmax_combine(node[:, -1:], node[:, :-1], m_key, S_key)
+            m, S = self.combine(node[:, -1:], node[:, :-1], m_key, S_key)
             tree[self._heads, idx] = torch.cat([S, m], dim=-1)
             idx = idx + (idx & -idx)
             idx = torch.where(idx > self.num_cells, self.num_cells + 1, idx)  # exhausted: write the scratch node
@@ -269,8 +327,11 @@ class OrderFenwickCache:
         cut = self.cells(f[:, 0] - f[:, 1])  # (H,)
         m1, S1 = self._prefix(self.tree1, cut + 1, f[:, :1])  # cells <= cut
         m2, S2 = self._prefix(self.tree2, self.num_cells - 1 - cut, f[:, 1:])  # cells > cut (reversed index)
-        m, S = online_softmax_combine(m1, S1, m2, S2)
-        m, S = online_softmax_combine(m, S, b.unsqueeze(-1), self.v0)
+        m, S = self.combine(m1, S1, m2, S2)
+        m, S = self.combine(m, S, b.unsqueeze(-1), self.v0)
+        if self.semiring == "max":
+            self._out_idx.copy_(S[:, -1])  # in place: the same buffer under eager and CUDA-graph execution
+            return S[:, :-1].clone()
         return S[:, :-1] / S[:, -1:]
 
     def _step_impl(self, f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
@@ -321,10 +382,12 @@ class OrderFenwickCache:
         Returns:
             (H, d) attention output of the new token over the cached keys and itself.
         """
-        f, g, b, v = f.float(), g.float(), b.float(), _append_ones(v.float())
+        f, g, b, v = f.float(), g.float(), b.float(), v.float()
         if self.v0 is None:  # the first token is the sink
-            self.prefill(g.unsqueeze(1), v[:, :-1].unsqueeze(1))
-            return v[:, :-1].clone()
+            self.prefill(g.unsqueeze(1), v.unsqueeze(1))
+            self._out_idx.zero_()
+            return v.clone()
+        v = _payload(v, torch.tensor(self.n, device=v.device), self.semiring)  # the new key's position is n
         self.n += 1
         if self.impl == "triton" and f.is_cuda:
             return self._launch(f, g, b, v, update=True)
@@ -350,9 +413,10 @@ class OrderFenwickCache:
         num_edges = self.edges.shape[-1]
         _fenwick_step_kernel[(num_heads,)](
             self.tree1, self.tree2, self.edges, f.contiguous(), g.contiguous(), b.contiguous(), v.contiguous(),
-            self.v0, self._out, self.num_cells, num_edges, self.edges.stride(0) if self.edges.dim() == 2 else 0,
-            WIDTH=width, BLOCK_D=triton.next_power_of_2(width), NUM_STEPS=self.num_steps,
-            NUM_SEARCH=(num_edges + 1).bit_length(), DO_UPDATE=update, num_warps=max(1, min(4, width // 64)),
+            self.v0, self._out, self._out_idx, self.num_cells, num_edges,
+            self.edges.stride(0) if self.edges.dim() == 2 else 0, WIDTH=width, BLOCK_D=triton.next_power_of_2(width),
+            NUM_STEPS=self.num_steps, NUM_SEARCH=(num_edges + 1).bit_length(), DO_UPDATE=update,
+            SEMIRING_MAX=self.semiring == "max", num_warps=max(1, min(4, width // 64)),
         )
         return self._out.clone()
 
@@ -361,8 +425,17 @@ class OrderFenwickCache:
 if triton is not None:
 
     @triton.jit
-    def _fenwick_combine(m_acc, S_acc, m_new, S_new):
-        """Online-softmax combine; m are (1,) tensors, S are (BLOCK_D,) vectors. (-inf, 0) is the identity."""
+    def _fenwick_combine(m_acc, S_acc, m_new, S_new, cols, WIDTH: tl.constexpr, SEMIRING_MAX: tl.constexpr):
+        """Combine of two states; m are (1,) tensors, S are (BLOCK_D,) rows [payload, (m column zeroed)].
+
+        Log-sum-exp: online-softmax rescale and add ((-inf, 0) is the identity). Max: keep the state with the larger
+        logit, ties to the larger position (payload column WIDTH - 2), a -inf state never wins.
+        """
+        if SEMIRING_MAX:
+            idx_acc = tl.sum(tl.where(cols == WIDTH - 2, S_acc, 0.0), axis=0)
+            idx_new = tl.sum(tl.where(cols == WIDTH - 2, S_new, 0.0), axis=0)
+            take = (m_new > m_acc) | ((m_new == m_acc) & (idx_new > idx_acc) & (m_new > float("-inf")))
+            return tl.where(take, m_new, m_acc), tl.where(take, S_new, S_acc)
         m = tl.maximum(m_acc, m_new)
         m_s = tl.where(m == float("-inf"), 0.0, m)
         w_acc = tl.where(m_acc == float("-inf"), 0.0, tl.exp(tl.where(m_acc == float("-inf"), 0.0, m_acc) - m_s))
@@ -384,7 +457,8 @@ if triton is not None:
         return lo
 
     @triton.jit
-    def _fenwick_prefix(Tree, start, shift, cols, mask, WIDTH: tl.constexpr, NUM_STEPS: tl.constexpr):
+    def _fenwick_prefix(Tree, start, shift, cols, mask, WIDTH: tl.constexpr, NUM_STEPS: tl.constexpr,
+                        SEMIRING_MAX: tl.constexpr):
         """Combine of the nodes start, start - lowbit(start), ... (node 0 = identity), logits shifted by -shift."""
         m = tl.full((1,), float("-inf"), dtype=tl.float32)
         S = tl.zeros_like(cols.to(tl.float32))
@@ -394,13 +468,13 @@ if triton is not None:
             node = tl.load(row + cols, mask=mask, other=0.0)
             m_node = tl.load(row + (WIDTH - 1) + tl.zeros((1,), dtype=tl.int32))
             S_node = tl.where(cols == WIDTH - 1, 0.0, node)
-            m, S = _fenwick_combine(m, S, m_node - shift, S_node)
+            m, S = _fenwick_combine(m, S, m_node - shift, S_node, cols, WIDTH, SEMIRING_MAX)
             idx = idx - (idx & (-idx))
         return m, S
 
     @triton.jit
     def _fenwick_update(Tree, start, m_key, S_key, num_cells, cols, mask, WIDTH: tl.constexpr,
-                        NUM_STEPS: tl.constexpr):
+                        NUM_STEPS: tl.constexpr, SEMIRING_MAX: tl.constexpr):
         """Combine the key state into the nodes start, start + lowbit(start), ... <= B (then the scratch node)."""
         idx = start
         for _ in range(NUM_STEPS):
@@ -408,20 +482,21 @@ if triton is not None:
             node = tl.load(row + cols, mask=mask, other=0.0)
             m_node = tl.load(row + (WIDTH - 1) + tl.zeros((1,), dtype=tl.int32))
             S_node = tl.where(cols == WIDTH - 1, 0.0, node)
-            m, S = _fenwick_combine(m_node, S_node, m_key, S_key)
+            m, S = _fenwick_combine(m_node, S_node, m_key, S_key, cols, WIDTH, SEMIRING_MAX)
             tl.store(row + cols, tl.where(cols == WIDTH - 1, m, S), mask=mask)
             idx = idx + (idx & (-idx))
             idx = tl.where(idx > num_cells, num_cells + 1, idx)
 
     @triton.jit
-    def _fenwick_step_kernel(T1, T2, Edges, F, G, Bsink, Vaug, V0, Out, num_cells, num_edges, stride_edges,
+    def _fenwick_step_kernel(T1, T2, Edges, F, G, Bsink, Vaug, V0, Out, OutIdx, num_cells, num_edges, stride_edges,
                              WIDTH: tl.constexpr, BLOCK_D: tl.constexpr, NUM_STEPS: tl.constexpr,
-                             NUM_SEARCH: tl.constexpr, DO_UPDATE: tl.constexpr):
+                             NUM_SEARCH: tl.constexpr, DO_UPDATE: tl.constexpr, SEMIRING_MAX: tl.constexpr):
         """One program per head: insert the key (DO_UPDATE), then the query over both trees and the sink.
 
-        T1, T2 (H, B + 2, WIDTH) trees with rows [S (d + 1), m]; Edges (B - 1,) or (H, B - 1) with row stride
-        ``stride_edges`` (0 = shared); F, G (H, 2); Bsink (H,); Vaug (H, d + 1) the augmented value of the new key;
-        V0 (H, d + 1) the sink value; Out (H, d).
+        T1, T2 (H, B + 2, WIDTH) trees with rows [payload (d + 1), m]; Edges (B - 1,) or (H, B - 1) with row stride
+        ``stride_edges`` (0 = shared); F, G (H, 2); Bsink (H,); Vaug (H, d + 1) the augmented value of the new key
+        ([v, 1], or [v, position] in the max semiring); V0 (H, d + 1) the sink's; Out (H, d) the attention output;
+        OutIdx (H,) the winner's position (max semiring; -1 otherwise).
         """
         h = tl.program_id(0)
         one = tl.zeros((1,), dtype=tl.int32)
@@ -439,17 +514,22 @@ if triton is not None:
             g2 = tl.load(G + h * 2 + 1 + one)
             key_S = tl.load(Vaug + h * (WIDTH - 1) + cols, mask=smask, other=0.0)
             cell = _fenwick_search(edges, num_edges, g1 - g2, NUM_SEARCH)
-            _fenwick_update(tree1, cell + 1, g1, key_S, num_cells, cols, mask, WIDTH, NUM_STEPS)
-            _fenwick_update(tree2, num_cells - cell, g2, key_S, num_cells, cols, mask, WIDTH, NUM_STEPS)
+            _fenwick_update(tree1, cell + 1, g1, key_S, num_cells, cols, mask, WIDTH, NUM_STEPS, SEMIRING_MAX)
+            _fenwick_update(tree2, num_cells - cell, g2, key_S, num_cells, cols, mask, WIDTH, NUM_STEPS, SEMIRING_MAX)
             tl.debug_barrier()
         cut = _fenwick_search(edges, num_edges, f1 - f2, NUM_SEARCH)
-        m, S = _fenwick_prefix(tree1, cut + 1, f1, cols, mask, WIDTH, NUM_STEPS)
-        m2, S2 = _fenwick_prefix(tree2, num_cells - 1 - cut, f2, cols, mask, WIDTH, NUM_STEPS)
-        m, S = _fenwick_combine(m, S, m2, S2)
+        m, S = _fenwick_prefix(tree1, cut + 1, f1, cols, mask, WIDTH, NUM_STEPS, SEMIRING_MAX)
+        m2, S2 = _fenwick_prefix(tree2, num_cells - 1 - cut, f2, cols, mask, WIDTH, NUM_STEPS, SEMIRING_MAX)
+        m, S = _fenwick_combine(m, S, m2, S2, cols, WIDTH, SEMIRING_MAX)
         v0 = tl.load(V0 + h * (WIDTH - 1) + cols, mask=smask, other=0.0)
-        m, S = _fenwick_combine(m, S, tl.load(Bsink + h + one), v0)
-        denom = tl.sum(tl.where(cols == WIDTH - 2, S, 0.0), axis=0)
-        tl.store(Out + h * (WIDTH - 2) + cols, S / denom, mask=cols < WIDTH - 2)
+        m, S = _fenwick_combine(m, S, tl.load(Bsink + h + one), v0, cols, WIDTH, SEMIRING_MAX)
+        last = tl.sum(tl.where(cols == WIDTH - 2, S, 0.0), axis=0)  # the normaliser, or the winner's position
+        if SEMIRING_MAX:
+            tl.store(Out + h * (WIDTH - 2) + cols, S, mask=cols < WIDTH - 2)
+            tl.store(OutIdx + h + one, last + tl.zeros((1,), dtype=tl.float32))
+        else:
+            tl.store(Out + h * (WIDTH - 2) + cols, S / last, mask=cols < WIDTH - 2)
+            tl.store(OutIdx + h + one, tl.full((1,), -1.0, dtype=tl.float32))
 
 
 # ------------------------------------------------------------------------------------------------------ training
@@ -491,7 +571,12 @@ def quantised_order_attn_func(
 
 # ------------------------------------------------------------------------------------------------------ reference
 def eager_quantised_order_attention_forward(
-    f: torch.Tensor, g: torch.Tensor, b: torch.Tensor, value: torch.Tensor, edges: torch.Tensor
+    f: torch.Tensor,
+    g: torch.Tensor,
+    b: torch.Tensor,
+    value: torch.Tensor,
+    edges: torch.Tensor,
+    semiring: Semiring = "logsumexp",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """O(N^2) fp64 reference of the quantised model: branch by cells, exact logits, causal, sink at key 0.
 
@@ -501,10 +586,12 @@ def eager_quantised_order_attention_forward(
         b: (H, N) sink logits.
         value: (H, N, d) values.
         edges: cell edges as in ``OrderFenwickCache``.
+        semiring: "logsumexp" (softmax) or "max" (one-hot on the best key, ties to the later key).
 
     Returns:
         attn_output (H, N, d) and attn_weights (H, N, N), both float64.
     """
+    _check_semiring(semiring)
     cell = rank_cells(edges, g[..., 0] - g[..., 1])  # (H, N)
     cut = rank_cells(edges, f[..., 0] - f[..., 1])
     f, g, b, value = f.double(), g.double(), b.double(), value.double()
@@ -514,5 +601,5 @@ def eager_quantised_order_attention_forward(
     scores = torch.cat([b.unsqueeze(-1), scores[..., 1:]], dim=-1)
     seq_len = scores.shape[-1]
     scores = scores.masked_fill(~torch.ones(seq_len, seq_len, dtype=torch.bool, device=scores.device).tril(), NEG)
-    attn_weights = torch.softmax(scores, dim=-1)
+    attn_weights = torch.softmax(scores, dim=-1) if semiring == "logsumexp" else argmax_weights(scores)
     return attn_weights @ value, attn_weights

@@ -203,3 +203,58 @@ def test_quantised_attn_forward_backward_and_decode(per_head, N, chunk, num_cell
     for t in range(prefill, N):
         step = cache.step(f[:, t], g[:, t], b[:, t], V[:, t])
         torch.testing.assert_close(step, out[:, t].detach(), rtol=1e-4, atol=1e-4)
+
+
+def _max_reference(f, g, b, V, edges):
+    out, weights = eager_quantised_order_attention_forward(f, g, b, V, edges, semiring="max")
+    return out.float(), weights.argmax(dim=-1)
+
+
+@pytest.mark.parametrize("impl,cuda_graph", [("torch", False), ("torch", True), ("triton", False)])
+@pytest.mark.parametrize("kind,H,N,d,num_cells,prefill", [("uniform", 2, 9, 4, 3, 0), ("quantile", 3, 40, 8, 16, 13),
+                                                          ("ties", 2, 70, 5, 8, 64), ("exact", 2, 70, 5, 0, 1)])
+def test_max_semiring_cache_matches_reference(impl, cuda_graph, kind, H, N, d, num_cells, prefill):
+    """Max-semiring decoding: the winner's value and position equal the eager argmax at every step."""
+    if (impl == "triton" or cuda_graph) and DEVICE != "cuda":
+        pytest.skip("GPU path")
+    f, g, b, V = _inputs(N * 11 + prefill + len(kind), H, N, d)
+    g[:, 20:26] = g[:, 20:21]  # a run of identical keys: the latest visible one wins
+    edges = _edges(kind, f, g, num_cells)
+    ref_out, ref_idx = _max_reference(f, g, b, V, edges)
+    cache = OrderFenwickCache(edges, cuda_graph=cuda_graph, impl=impl, semiring="max")
+    if prefill:
+        cache.prefill(g[:, :prefill], V[:, :prefill])
+    for t in range(prefill, N):
+        out = cache.step(f[:, t], g[:, t], b[:, t], V[:, t])
+        torch.testing.assert_close(out, ref_out[:, t], rtol=0, atol=0)
+        assert torch.equal(cache.last_argmax.cpu(), ref_idx[:, t].cpu())
+        torch.testing.assert_close(cache.query(f[:, t], b[:, t]), out, rtol=0, atol=0)
+        assert torch.equal(cache.last_argmax.cpu(), ref_idx[:, t].cpu())
+
+
+@pytest.mark.parametrize("impl", ["torch", "triton"])
+def test_max_semiring_asof_exact_with_small_slopes(impl):
+    """As-of lookup in the max semiring: g = (time, -mu time), f = (T, -mu T) retrieves the latest record with
+    time <= T exactly. Only comparisons are made, so mu merely has to exceed the largest gap (here 500, not the 5e4 the
+    softmax needs to make branch 2 negligible) and every value stays an exact fp32 integer."""
+    if impl == "triton" and DEVICE != "cuda":
+        pytest.skip("GPU path")
+    torch.manual_seed(0)
+    H, N, d, mu = 2, 400, 4, 500.0
+    times = torch.cumsum(torch.randint(1, 40, (N,)), 0).float()
+    times[0] = -1.0  # the sink
+    g = torch.stack([times, -mu * times], -1).expand(H, -1, -1).contiguous().to(DEVICE)
+    V = torch.randn(H, N, d).to(DEVICE)
+    T = torch.tensor([float(torch.randint(int(times[1]), int(times[-1]) + 1, (1,))) for _ in range(N)])
+    f = torch.stack([T, -mu * T], -1).expand(H, -1, -1).contiguous().to(DEVICE)
+    b = torch.full((H, N), float("-inf"), device=DEVICE)
+    edges = ((1 + mu) * (torch.arange(int(times[-1]) + 1) + 0.5)).to(DEVICE)  # one cell per integer time
+    cache = OrderFenwickCache(edges, impl=impl, semiring="max")
+    cache.prefill(g[:, :200], V[:, :200])
+    hits = 0
+    for t in range(200, N):
+        cache.step(f[:, t], g[:, t], b[:, t], V[:, t])
+        visible = times[1 : t + 1]
+        expected = int(torch.nonzero(visible <= T[t]).max()) + 1 if bool((visible <= T[t]).any()) else 0
+        hits += int((cache.last_argmax == expected).all())
+    assert hits == N - 200
